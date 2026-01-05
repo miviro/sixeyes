@@ -1,0 +1,19 @@
+model_path: model/drone.pt
+class_name: drone
+sources:
+  - 0
+  - 1
+capture:
+  width: 640
+  height: 640
+  fps: 30
+inference:
+  imgsz: 640
+  conf: 0.25
+  iou: 0.7
+tracking:
+  tracker_yaml: bytetrack.yaml
+triangulation:
+  calibration_path: calibration/stereo.yaml
+output:
+  print_rate_hz: 10
