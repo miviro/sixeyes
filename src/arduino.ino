@@ -1,7 +1,7 @@
 #include <Arduino.h>
 
-const int pitchPin = 2;
-const int yawPin = 4;
+const int pitchPin = 4;
+const int yawPin = 2;
 const int freq = 50;
 const int resolution = 12;
 
