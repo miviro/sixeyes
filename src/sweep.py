@@ -46,6 +46,7 @@ try:
 except KeyboardInterrupt:
     print("Stopped.")
 finally:
+    ser.reset_output_buffer()         # discard queued frames in OS TX buffer
     ser.write(encode_angles(90, 90))  # center before PWM cuts out
-    time.sleep(0.6)                   # let Arduino idle-timeout trigger
+    time.sleep(0.15)                  # let Arduino idle-timeout trigger
     ser.close()

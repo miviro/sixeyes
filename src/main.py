@@ -51,84 +51,77 @@ lost_frames = 0
 
 
 def send_to_esp32(p, y):
-    cmd = f"{int(p)},{int(y)}\n"
-    ser.write(cmd.encode())
+    ser.write(bytes([0xFF, int(p), int(y)]))
 
 
-def drain_esp32():
-    """Drain the serial buffer to prevent overflow."""
-    while ser.in_waiting > 0:
-        try:
-            ser.readline()
-        except Exception:
-            pass
+try:
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
 
+        # Correct for camera mounted 90° clockwise
+        frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+        annotated_frame = frame.copy()
+        results = model.track(frame, persist=True, stream=True)
 
-    # Correct for camera mounted 90° clockwise
-    frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        detected = False
+        for r in results:
+            annotated_frame = r.plot()
 
-    drain_esp32()  # keep serial buffer clear
+            if r.boxes and r.boxes.id is not None:
+                detected    = True
+                lost_frames = 0
+                state       = "TRACK"
 
-    annotated_frame = frame.copy()
-    results = model.track(frame, persist=True, stream=True)
+                box = r.boxes.xywh[0].cpu().numpy()
+                face_x, face_y = box[0], box[1]
 
-    detected = False
-    for r in results:
-        annotated_frame = r.plot()
+                error_x = face_x - center_x
+                error_y = face_y - center_y
 
-        if r.boxes and r.boxes.id is not None:
-            detected    = True
-            lost_frames = 0
-            state       = "TRACK"
+                moved = False
+                if abs(error_x) > DEADBAND_PIXELS:
+                    current_yaw -= (error_x / center_x) * GAIN
+                    moved = True
+                if abs(error_y) > DEADBAND_PIXELS:
+                    current_pitch += (error_y / center_y) * GAIN
+                    moved = True
 
-            box = r.boxes.xywh[0].cpu().numpy()
-            face_x, face_y = box[0], box[1]
+                if moved:
+                    current_yaw   = max(YAW_MIN,   min(YAW_MAX,   current_yaw))
+                    current_pitch = max(PITCH_MIN, min(PITCH_MAX, current_pitch))
+                    send_to_esp32(current_pitch, current_yaw)
 
-            error_x = face_x - center_x
-            error_y = face_y - center_y
+        # Count frames without a detection and fall back to sweep when stale
+        if not detected:
+            lost_frames += 1
+            if lost_frames >= LOST_FRAMES_THRESHOLD:
+                state = "SWEEP"
 
-            moved = False
-            if abs(error_x) > DEADBAND_PIXELS:
-                current_yaw -= (error_x / center_x) * GAIN
-                moved = True
-            if abs(error_y) > DEADBAND_PIXELS:
-                current_pitch += (error_y / center_y) * GAIN
-                moved = True
+        # Sweep: circular scan across both axes
+        if state == "SWEEP":
+            sweep_angle   += SWEEP_SPEED
+            current_yaw    = 90.0 + SWEEP_YAW_RADIUS   * math.cos(sweep_angle)
+            current_pitch  = 90.0 + SWEEP_PITCH_RADIUS  * math.sin(sweep_angle)
+            send_to_esp32(current_pitch, current_yaw)
 
-            if moved:
-                current_yaw   = max(YAW_MIN,   min(YAW_MAX,   current_yaw))
-                current_pitch = max(PITCH_MIN, min(PITCH_MAX, current_pitch))
-                send_to_esp32(current_pitch, current_yaw)
+        # Overlay: state and current servo position
+        color = (0, 255, 0) if state == "TRACK" else (0, 165, 255)
+        cv2.putText(annotated_frame, f"State: {state}",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        cv2.putText(annotated_frame, f"Yaw: {current_yaw:.1f}  Pitch: {current_pitch:.1f}",
+                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        cv2.imshow("Face Tracker", annotated_frame)
 
-    # Count frames without a detection and fall back to sweep when stale
-    if not detected:
-        lost_frames += 1
-        if lost_frames >= LOST_FRAMES_THRESHOLD:
-            state = "SWEEP"
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
 
-    # Sweep: circular scan across both axes
-    if state == "SWEEP":
-        sweep_angle   += SWEEP_SPEED
-        current_yaw    = 90.0 + SWEEP_YAW_RADIUS   * math.cos(sweep_angle)
-        current_pitch  = 90.0 + SWEEP_PITCH_RADIUS  * math.sin(sweep_angle)
-        send_to_esp32(current_pitch, current_yaw)
-
-    # Overlay: state and current servo position
-    color = (0, 255, 0) if state == "TRACK" else (0, 165, 255)
-    cv2.putText(annotated_frame, f"State: {state}",
-                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-    cv2.putText(annotated_frame, f"Yaw: {current_yaw:.1f}  Pitch: {current_pitch:.1f}",
-                (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-    cv2.imshow("Face Tracker", annotated_frame)
-
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        break
-
-cap.release()
-cv2.destroyAllWindows()
-ser.close()
+finally:
+    ser.reset_output_buffer()         # discard any frames still queued in the OS TX buffer
+    send_to_esp32(90, 90)             # center before PWM cuts
+    time.sleep(0.15)                  # let Arduino idle-timeout fire
+    cap.release()
+    cv2.destroyAllWindows()
+    ser.close()
