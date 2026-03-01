@@ -2,6 +2,11 @@ import math
 import serial
 import time
 
+
+def encode_angles(pitch: float, yaw: float) -> bytes:
+    """Pack pitch and yaw into a 3-byte binary frame: [0xFF, pitch, yaw]."""
+    return bytes([0xFF, int(pitch), int(yaw)])
+
 SERIAL_PORT  = "/dev/ttyUSB0"
 BAUD_RATE    = 115200
 
@@ -35,12 +40,12 @@ try:
         yaw   = YAW_CENTER   + YAW_RADIUS   * math.cos(angle)
         pitch = PITCH_CENTER + PITCH_RADIUS  * math.sin(angle)
 
-        ser.write(f"{int(pitch)},{int(yaw)}\n".encode())
-        while ser.in_waiting > 0:
-            ser.readline()
+        ser.write(encode_angles(pitch, yaw))
 
         time.sleep(LOOP_DELAY)
 except KeyboardInterrupt:
     print("Stopped.")
 finally:
+    ser.write(encode_angles(90, 90))  # center before PWM cuts out
+    time.sleep(0.6)                   # let Arduino idle-timeout trigger
     ser.close()

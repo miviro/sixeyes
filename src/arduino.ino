@@ -1,72 +1,80 @@
 #include <Arduino.h>
 
-const int pitchPin = 4;
-const int yawPin = 2;
-const int freq = 50;
+const int pitchPin   = 4;
+const int yawPin     = 2;
+const int freq       = 50;
 const int resolution = 12;
 
-float currentPitch = 90.0;
-float currentYaw = 90.0;
-float targetPitch = 90.0;
-float targetYaw = 90.0;
-
-// Deadband: within this range, don't move (kills micro-jitter)
-const float DEADBAND = 5.0f;
-
-// Physical travel limits
-const float PITCH_MIN = 20.0f;
-const float PITCH_MAX = 160.0f;
-const float YAW_MIN   = 20.0f;
+const float PITCH_MIN = 0.0f;
+const float PITCH_MAX = 140.0f;
+const float YAW_MIN   = 0.0f;
 const float YAW_MAX   = 160.0f;
 
-unsigned long lastBroadcast = 0;
-const unsigned long broadcastInterval = 50; // Broadcast every 50ms (20Hz)
+// Precomputed servo constants  (duty = DUTY_OFFSET + angle * DUTY_SCALE)
+// pulseUs  = 500 + angle * (1900/180)
+// duty     = pulseUs * 4095 / 20000
+// => duty  = 102.375 + angle * 2.16042
+static const float DUTY_OFFSET = 102.375f;
+static const float DUTY_SCALE  = 2.16042f;  // (1900.0/180.0) * (4095.0/20000.0)
 
-void updateServo(int pin, float angle) {
-  angle = constrain(angle, 0.0f, 180.0f);
-  // Float-safe pulse calculation (avoids integer truncation from map())
-  long pulseUs = (long)(500.0f + (angle / 180.0f) * 1900.0f);
-  uint32_t dutySteps = (pulseUs * 4095UL) / 20000UL;
-  ledcWrite(pin, 4095 - dutySteps);
+inline void writeServo(int pin, float angle) {
+  uint32_t duty = (uint32_t)(DUTY_OFFSET + angle * DUTY_SCALE);
+  ledcWrite(pin, 4095 - duty);
 }
 
+// ---------------------------------------------------------------------------
+// Non-blocking binary parser
+// Protocol: 3 bytes — 0xFF (sync) | pitch (0-180) | yaw (0-180)
+// 0xFF is the sync marker: safely outside the valid angle range (0-180)
+// ---------------------------------------------------------------------------
+// Stop PWM after this many ms of silence → servo goes quiet and unpowered
+const unsigned long IDLE_TIMEOUT_MS = 500;
+
+enum ParseState : uint8_t { WAIT_SYNC, READ_PITCH, READ_YAW };
+static ParseState state       = WAIT_SYNC;
+static float      parsedPitch = 90.0f;
+static bool       active      = false;
+static unsigned long lastFrameMs = 0;
+
+inline void detachServos() {
+  ledcWrite(pitchPin, 0);
+  ledcWrite(yawPin,   0);
+  active = false;
+}
 
 void setup() {
   Serial.begin(115200);
   ledcAttach(pitchPin, freq, resolution);
-  ledcAttach(yawPin, freq, resolution);
-  updateServo(pitchPin, currentPitch);
-  updateServo(yawPin, currentYaw);
+  ledcAttach(yawPin,   freq, resolution);
+  writeServo(pitchPin, 90.0f);
+  writeServo(yawPin,   90.0f);
+  lastFrameMs = millis();
 }
 
 void loop() {
-  // 1. Receive Target (format: "pitch,yaw\n")
-  if (Serial.available() > 0) {
-    targetPitch = constrain((float)Serial.parseInt(), PITCH_MIN, PITCH_MAX);
-    if (Serial.read() == ',') {
-      targetYaw = constrain((float)Serial.parseInt(), YAW_MIN, YAW_MAX);
+  while (Serial.available()) {
+    uint8_t b = Serial.read();
+
+    switch (state) {
+      case WAIT_SYNC:
+        if (b == 0xFF) state = READ_PITCH;
+        break;
+
+      case READ_PITCH:
+        parsedPitch = constrain((float)b, PITCH_MIN, PITCH_MAX);
+        state = READ_YAW;
+        break;
+
+      case READ_YAW:
+        writeServo(pitchPin, parsedPitch);
+        writeServo(yawPin, constrain((float)b, YAW_MIN, YAW_MAX));
+        lastFrameMs = millis();
+        active      = true;
+        state       = WAIT_SYNC;
+        break;
     }
-    while (Serial.available() > 0) Serial.read();
   }
 
-  // 2. Instant move with deadband
-  if (fabsf(targetPitch - currentPitch) > DEADBAND) {
-    currentPitch = targetPitch;
-    updateServo(pitchPin, currentPitch);
-  }
-  if (fabsf(targetYaw - currentYaw) > DEADBAND) {
-    currentYaw = targetYaw;
-    updateServo(yawPin, currentYaw);
-  }
-
-  // 3. Continuous Broadcast (format: "P:angle,Y:angle")
-  if (millis() - lastBroadcast >= broadcastInterval) {
-    Serial.print("P:");
-    Serial.print(currentPitch, 1);
-    Serial.print(",Y:");
-    Serial.println(currentYaw, 1);
-    lastBroadcast = millis();
-  }
-
-  delay(10);
+  if (active && (millis() - lastFrameMs > IDLE_TIMEOUT_MS))
+    detachServos();
 }
