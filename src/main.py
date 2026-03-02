@@ -25,8 +25,8 @@ SWEEP_YAW_RADIUS   = 55.0   # degrees
 SWEEP_PITCH_RADIUS = 35.0   # degrees
 
 # PID gains  (output = degrees of servo movement per frame)
-YAW_KP,   YAW_KI,   YAW_KD   = 0.005, 0.00, 0.0
-PITCH_KP, PITCH_KI, PITCH_KD = 0.005, 0.00, 0.0
+YAW_KP,   YAW_KI,   YAW_KD   = 0.01, 0.00, 0.0
+PITCH_KP, PITCH_KI, PITCH_KD = 0.01, 0.00, 0.0
 INTEGRAL_CLAMP = 20.0       # max absolute integral term (degrees)
 
 
