@@ -11,8 +11,8 @@ BAUD_RATE   = 115200
 model       = YOLO("faces.pt")
 
 # Servo travel limits (degrees)
-YAW_MIN,   YAW_MAX   = 10,  140
-PITCH_MIN, PITCH_MAX = 0,  180
+YAW_MIN,   YAW_MAX   = 0,   180
+PITCH_MIN, PITCH_MAX = 10,  140
 
 # Deadband — pixel radius around centre treated as locked
 DEADBAND_PIXELS = 100
@@ -195,9 +195,10 @@ try:
 
         elif state == "SWEEP":
             sweep_angle  += SWEEP_SPEED
-            # Pitch: triangle wave 0 → 180 → 0 → ...
+            # Pitch: triangle wave PITCH_MIN → PITCH_MAX → PITCH_MIN → ...
             pitch_phase   = (sweep_angle / math.pi) % 2
-            current_pitch = pitch_phase * 180 if pitch_phase < 1 else (2 - pitch_phase) * 180
+            t             = pitch_phase if pitch_phase < 1 else 2 - pitch_phase
+            current_pitch = PITCH_MIN + t * (PITCH_MAX - PITCH_MIN)
             # Yaw: sinusoid ±SWEEP_YAW_AMP around centre, faster than pitch
             current_yaw   = SWEEP_YAW_CENTER + SWEEP_YAW_AMP * math.sin(sweep_angle * SWEEP_YAW_FREQ)
             send_to_esp32(current_pitch, current_yaw)
