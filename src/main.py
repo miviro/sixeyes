@@ -10,8 +10,8 @@ BAUD_RATE   = 115200
 model       = YOLO("faces.pt")
 
 # Servo travel limits (degrees)
-YAW_MIN,   YAW_MAX   = 30,  150
-PITCH_MIN, PITCH_MAX = 50,  130
+YAW_MIN,   YAW_MAX   = 0,  140
+PITCH_MIN, PITCH_MAX = 0,  180
 
 # Deadband — pixel radius around centre treated as locked
 DEADBAND_PIXELS = 10
