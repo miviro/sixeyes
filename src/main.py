@@ -14,7 +14,7 @@ YAW_MIN,   YAW_MAX   = 0,  140
 PITCH_MIN, PITCH_MAX = 0,  180
 
 # Deadband — pixel radius around centre treated as locked
-DEADBAND_PIXELS = 10
+DEADBAND_PIXELS = 100
 
 # Frames without detection before falling back to sweep
 LOST_FRAMES_THRESHOLD = 20
@@ -25,8 +25,8 @@ SWEEP_YAW_RADIUS   = 55.0   # degrees
 SWEEP_PITCH_RADIUS = 35.0   # degrees
 
 # PID gains  (output = degrees of servo movement per frame)
-YAW_KP,   YAW_KI,   YAW_KD   = 0.005, 0.00, 0.0
-PITCH_KP, PITCH_KI, PITCH_KD = 0.005, 0.00, 0.0
+YAW_KP,   YAW_KI,   YAW_KD   = 0.01, 0.00, 0.0
+PITCH_KP, PITCH_KI, PITCH_KD = 0.01, 0.00, 0.0
 INTEGRAL_CLAMP = 20.0       # max absolute integral term (degrees)
 
 
