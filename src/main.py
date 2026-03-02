@@ -15,7 +15,7 @@ YAW_MIN,   YAW_MAX   = 0,   160
 PITCH_MIN, PITCH_MAX = 10,  140
 
 # Deadband — pixel radius around centre treated as locked
-DEADBAND_PIXELS = 100
+DEADBAND_PIXELS = 20
 
 # Frames without detection before falling back to sweep
 LOST_FRAMES_THRESHOLD = 20
@@ -27,13 +27,19 @@ SWEEP_YAW_AMP    = 20.0   # ±degrees of yaw oscillation
 SWEEP_YAW_FREQ   = 6      # yaw oscillations per pitch triangle period
 
 # PID gains  (output = degrees of servo movement per frame)
-YAW_KP,   YAW_KI,   YAW_KD   = 0.01, 0.02, 0.0
-PITCH_KP, PITCH_KI, PITCH_KD = 0.01, 0.02, 0.0
+YAW_KP,   YAW_KI,   YAW_KD   = 0.01, 0.0, 0.02
+PITCH_KP, PITCH_KI, PITCH_KD = 0.01, 0.0, 0.02
 INTEGRAL_CLAMP = 20.0       # max absolute integral term (degrees)
 
 # Kalman filter noise (pixels²)
 KF_PROCESS_NOISE = 5.0
-KF_MEAS_NOISE    = 20.0
+KF_MEAS_NOISE    = 5.0
+
+# Pixels-per-degree calibration for motion feed-forward.
+# After 90° CCW rotation: x-axis ↔ yaw, y-axis ↔ pitch.
+# Rough default: frame_pixels / lens_FOV_degrees. Tune empirically.
+CAMERA_FOV_X = 62.0   # degrees along rotated-frame x (yaw axis)
+CAMERA_FOV_Y = 48.0   # degrees along rotated-frame y (pitch axis)
 
 
 class KalmanFilter2D:
@@ -43,7 +49,7 @@ class KalmanFilter2D:
     """
     def __init__(self):
         dt = 1.0
-        self.kf = cv2.KalmanFilter(4, 2)
+        self.kf = cv2.KalmanFilter(4, 2, 2)
         self.kf.transitionMatrix = np.array([
             [1, 0, dt,  0],
             [0, 1,  0, dt],
@@ -54,12 +60,18 @@ class KalmanFilter2D:
             [1, 0, 0, 0],
             [0, 1, 0, 0],
         ], dtype=np.float32)
+        self.kf.controlMatrix = np.array([
+            [1, 0],
+            [0, 1],
+            [0, 0],
+            [0, 0],
+        ], dtype=np.float32)
         self.kf.processNoiseCov     = np.eye(4, dtype=np.float32) * KF_PROCESS_NOISE
         self.kf.measurementNoiseCov = np.eye(2, dtype=np.float32) * KF_MEAS_NOISE
         self.kf.errorCovPost        = np.eye(4, dtype=np.float32)
         self.initialized = False
 
-    def step(self, x: float = None, y: float = None):
+    def step(self, x=None, y=None, control_dx=0.0, control_dy=0.0):
         """
         One Kalman cycle per frame.
         With (x, y): predict + correct → posterior estimate.
@@ -72,7 +84,8 @@ class KalmanFilter2D:
             self.kf.statePost = np.array([[x], [y], [0.0], [0.0]], dtype=np.float32)
             self.initialized  = True
 
-        prior = self.kf.predict()
+        control = np.array([[control_dx], [control_dy]], dtype=np.float32)
+        prior = self.kf.predict(control)
         if x is not None:
             post = self.kf.correct(np.array([[x], [y]], dtype=np.float32))
             return float(post[0]), float(post[1])
@@ -119,6 +132,8 @@ height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 # After 90° CCW rotation, frame dimensions swap
 center_x = height // 2
 center_y = width  // 2
+px_per_deg_x = height / CAMERA_FOV_X   # rotated frame x spans 'height' px
+px_per_deg_y = width  / CAMERA_FOV_Y   # rotated frame y spans 'width'  px
 
 current_pitch = 90.0
 current_yaw   = 90.0
@@ -130,6 +145,9 @@ lost_frames = 0
 pid_yaw   = PIDController(YAW_KP,   YAW_KI,   YAW_KD)
 pid_pitch = PIDController(PITCH_KP, PITCH_KI, PITCH_KD)
 kalman    = KalmanFilter2D()
+
+pending_dx = 0.0
+pending_dy = 0.0
 
 
 def send_to_esp32(p, y):
@@ -173,7 +191,10 @@ try:
                     pid_pitch.reset()
                 state = "SWEEP"
 
-        est_x, est_y = kalman.step(face_x, face_y)
+        est_x, est_y = kalman.step(face_x, face_y,
+                                   control_dx=pending_dx, control_dy=pending_dy)
+        pending_dx = 0.0
+        pending_dy = 0.0
 
         if state == "TRACK" and est_x is not None:
             error_x = est_x - center_x
@@ -181,11 +202,15 @@ try:
 
             moved = False
             if abs(error_x) > DEADBAND_PIXELS:
-                current_yaw -= pid_yaw.compute(error_x)
+                delta_yaw    = pid_yaw.compute(error_x)
+                current_yaw += delta_yaw
+                pending_dx   = -delta_yaw * px_per_deg_x
                 moved = True
 
             if abs(error_y) > DEADBAND_PIXELS:
-                current_pitch += pid_pitch.compute(error_y)
+                delta_pitch    = pid_pitch.compute(error_y)
+                current_pitch += delta_pitch
+                pending_dy     = -delta_pitch * px_per_deg_y
                 moved = True
 
             if moved:
