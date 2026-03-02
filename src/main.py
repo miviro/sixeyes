@@ -20,12 +20,11 @@ DEADBAND_PIXELS = 100
 # Frames without detection before falling back to sweep
 LOST_FRAMES_THRESHOLD = 20
 
-# Sweep: elliptical scan centred at servo midpoints, full range
-SWEEP_SPEED        = 0.05                         # rad / frame (~2s per full circle at 30fps)
-SWEEP_YAW_CENTER   = (YAW_MIN   + YAW_MAX)   / 2  # 70°
-SWEEP_PITCH_CENTER = (PITCH_MIN + PITCH_MAX) / 2  # 90°
-SWEEP_YAW_RADIUS   = (YAW_MAX   - YAW_MIN)   / 2  # 70°
-SWEEP_PITCH_RADIUS = (PITCH_MAX - PITCH_MIN) / 2  # 90°
+# Sweep: pitch 0-180 triangle wave, yaw sinusoid ±20° around centre
+SWEEP_SPEED      = 0.05   # rad / frame — pitch advance rate (~4s per full 0→180→0 at 30fps)
+SWEEP_YAW_CENTER = (YAW_MIN + YAW_MAX) / 2   # 75°
+SWEEP_YAW_AMP    = 20.0   # ±degrees of yaw oscillation
+SWEEP_YAW_FREQ   = 6      # yaw oscillations per pitch triangle period
 
 # PID gains  (output = degrees of servo movement per frame)
 YAW_KP,   YAW_KI,   YAW_KD   = 0.01, 0.02, 0.0
@@ -195,9 +194,12 @@ try:
                 send_to_esp32(current_pitch, current_yaw)
 
         elif state == "SWEEP":
-            sweep_angle   += SWEEP_SPEED
-            current_yaw    = SWEEP_YAW_CENTER   + SWEEP_YAW_RADIUS   * math.cos(sweep_angle)
-            current_pitch  = SWEEP_PITCH_CENTER + SWEEP_PITCH_RADIUS * math.sin(sweep_angle)
+            sweep_angle  += SWEEP_SPEED
+            # Pitch: triangle wave 0 → 180 → 0 → ...
+            pitch_phase   = (sweep_angle / math.pi) % 2
+            current_pitch = pitch_phase * 180 if pitch_phase < 1 else (2 - pitch_phase) * 180
+            # Yaw: sinusoid ±SWEEP_YAW_AMP around centre, faster than pitch
+            current_yaw   = SWEEP_YAW_CENTER + SWEEP_YAW_AMP * math.sin(sweep_angle * SWEEP_YAW_FREQ)
             send_to_esp32(current_pitch, current_yaw)
 
         color = (0, 255, 0) if state == "TRACK" else (0, 165, 255)
