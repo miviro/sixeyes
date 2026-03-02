@@ -11,7 +11,7 @@ BAUD_RATE   = 115200
 model       = YOLO("faces.pt")
 
 # Servo travel limits (degrees)
-YAW_MIN,   YAW_MAX   = 0,   180
+YAW_MIN,   YAW_MAX   = 0,   160
 PITCH_MIN, PITCH_MAX = 10,  140
 
 # Deadband — pixel radius around centre treated as locked
@@ -22,7 +22,7 @@ LOST_FRAMES_THRESHOLD = 20
 
 # Sweep: pitch 0-180 triangle wave, yaw sinusoid ±20° around centre
 SWEEP_SPEED      = 0.05   # rad / frame — pitch advance rate (~4s per full 0→180→0 at 30fps)
-SWEEP_YAW_CENTER = (YAW_MIN + YAW_MAX) / 2   # 75°
+SWEEP_YAW_CENTER = (YAW_MIN + YAW_MAX) / 2   # 80°
 SWEEP_YAW_AMP    = 20.0   # ±degrees of yaw oscillation
 SWEEP_YAW_FREQ   = 6      # yaw oscillations per pitch triangle period
 
