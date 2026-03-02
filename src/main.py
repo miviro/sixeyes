@@ -2,6 +2,7 @@ import cv2
 import math
 import serial
 import time
+import numpy as np
 from ultralytics import YOLO
 
 # --- Configuration ---
@@ -19,15 +20,68 @@ DEADBAND_PIXELS = 100
 # Frames without detection before falling back to sweep
 LOST_FRAMES_THRESHOLD = 20
 
-# Sweep: elliptical scan centred at (90°, 90°)
-SWEEP_SPEED        = 0.03   # rad / frame
-SWEEP_YAW_RADIUS   = 55.0   # degrees
-SWEEP_PITCH_RADIUS = 35.0   # degrees
+# Sweep: elliptical scan centred at servo midpoints, full range
+SWEEP_SPEED        = 0.05                         # rad / frame (~2s per full circle at 30fps)
+SWEEP_YAW_CENTER   = (YAW_MIN   + YAW_MAX)   / 2  # 70°
+SWEEP_PITCH_CENTER = (PITCH_MIN + PITCH_MAX) / 2  # 90°
+SWEEP_YAW_RADIUS   = (YAW_MAX   - YAW_MIN)   / 2  # 70°
+SWEEP_PITCH_RADIUS = (PITCH_MAX - PITCH_MIN) / 2  # 90°
 
 # PID gains  (output = degrees of servo movement per frame)
 YAW_KP,   YAW_KI,   YAW_KD   = 0.01, 0.02, 0.0
 PITCH_KP, PITCH_KI, PITCH_KD = 0.01, 0.02, 0.0
 INTEGRAL_CLAMP = 20.0       # max absolute integral term (degrees)
+
+# Kalman filter noise (pixels²)
+KF_PROCESS_NOISE = 5.0
+KF_MEAS_NOISE    = 20.0
+
+
+class KalmanFilter2D:
+    """
+    Constant-velocity Kalman filter for a 2-D point.
+    State : [x, y, vx, vy]   Measurement : [x, y]
+    """
+    def __init__(self):
+        dt = 1.0
+        self.kf = cv2.KalmanFilter(4, 2)
+        self.kf.transitionMatrix = np.array([
+            [1, 0, dt,  0],
+            [0, 1,  0, dt],
+            [0, 0,  1,  0],
+            [0, 0,  0,  1],
+        ], dtype=np.float32)
+        self.kf.measurementMatrix = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+        ], dtype=np.float32)
+        self.kf.processNoiseCov     = np.eye(4, dtype=np.float32) * KF_PROCESS_NOISE
+        self.kf.measurementNoiseCov = np.eye(2, dtype=np.float32) * KF_MEAS_NOISE
+        self.kf.errorCovPost        = np.eye(4, dtype=np.float32)
+        self.initialized = False
+
+    def step(self, x: float = None, y: float = None):
+        """
+        One Kalman cycle per frame.
+        With (x, y): predict + correct → posterior estimate.
+        Without    : predict only      → extrapolated estimate.
+        Returns (est_x, est_y) or (None, None) before first detection.
+        """
+        if not self.initialized:
+            if x is None:
+                return None, None
+            self.kf.statePost = np.array([[x], [y], [0.0], [0.0]], dtype=np.float32)
+            self.initialized  = True
+
+        prior = self.kf.predict()
+        if x is not None:
+            post = self.kf.correct(np.array([[x], [y]], dtype=np.float32))
+            return float(post[0]), float(post[1])
+        return float(prior[0]), float(prior[1])
+
+    def reset(self):
+        self.initialized = False
+        self.kf.errorCovPost = np.eye(4, dtype=np.float32)
 
 
 class PIDController:
@@ -76,6 +130,7 @@ lost_frames = 0
 
 pid_yaw   = PIDController(YAW_KP,   YAW_KI,   YAW_KD)
 pid_pitch = PIDController(PITCH_KP, PITCH_KI, PITCH_KD)
+kalman    = KalmanFilter2D()
 
 
 def send_to_esp32(p, y):
@@ -103,6 +158,7 @@ try:
                 face_x, face_y = float(box[0]), float(box[1])
 
                 if state == "SWEEP":
+                    kalman.reset()
                     pid_yaw.reset()
                     pid_pitch.reset()
                     state = "TRACK"
@@ -113,13 +169,16 @@ try:
             lost_frames += 1
             if lost_frames >= LOST_FRAMES_THRESHOLD:
                 if state == "TRACK":
+                    kalman.reset()
                     pid_yaw.reset()
                     pid_pitch.reset()
                 state = "SWEEP"
 
-        if state == "TRACK" and face_x is not None:
-            error_x = face_x - center_x
-            error_y = face_y - center_y
+        est_x, est_y = kalman.step(face_x, face_y)
+
+        if state == "TRACK" and est_x is not None:
+            error_x = est_x - center_x
+            error_y = est_y - center_y
 
             moved = False
             if abs(error_x) > DEADBAND_PIXELS:
@@ -137,8 +196,8 @@ try:
 
         elif state == "SWEEP":
             sweep_angle   += SWEEP_SPEED
-            current_yaw    = 90.0 + SWEEP_YAW_RADIUS   * math.cos(sweep_angle)
-            current_pitch  = 90.0 + SWEEP_PITCH_RADIUS * math.sin(sweep_angle)
+            current_yaw    = SWEEP_YAW_CENTER   + SWEEP_YAW_RADIUS   * math.cos(sweep_angle)
+            current_pitch  = SWEEP_PITCH_CENTER + SWEEP_PITCH_RADIUS * math.sin(sweep_angle)
             send_to_esp32(current_pitch, current_yaw)
 
         color = (0, 255, 0) if state == "TRACK" else (0, 165, 255)
