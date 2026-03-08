@@ -10,8 +10,8 @@ const int resolution = 12;
 
 const float PITCH_MIN = 0.0f;
 const float PITCH_MAX = 140.0f;
-const float YAW_MIN   = 0.0f;
-const float YAW_MAX   = 160.0f;
+const float YAW_MIN   = 10.0f;
+const float YAW_MAX   = 170.0f;
 
 // Precomputed servo constants  (duty = DUTY_OFFSET + angle * DUTY_SCALE)
 // pulseUs  = 500 + angle * (1900/180)
