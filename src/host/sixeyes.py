@@ -30,9 +30,9 @@ LOST_FRAMES_THRESHOLD = 20
 
 # Search pattern: pitch triangle wave, yaw sinusoid around centre
 SWEEP_SPEED = 0.05
-SWEEP_YAW_CENTER = (YAW_MIN + YAW_MAX) / 2.0
-SWEEP_YAW_AMP = 20.0
-SWEEP_YAW_FREQ = 6.0
+SWEEP_PITCH_CENTER = (PITCH_MIN + PITCH_MAX) / 2.0
+SWEEP_PITCH_AMP = 20.0
+SWEEP_PITCH_FREQ = 6.0
 
 # PID gains (servo angle delta in degrees per control update)
 YAW_KP, YAW_KI, YAW_KD = 0.01, 0.0, 0.02
@@ -520,10 +520,10 @@ class PanTiltTracker:
     def _apply_sweep_control(self, dt: float) -> None:
         self.sweep_angle = (self.sweep_angle + SWEEP_SPEED * dt * CONTROL_REFERENCE_FPS) % (2.0 * math.pi)
 
-        pitch_phase = (self.sweep_angle / math.pi) % 2.0
-        triangle = pitch_phase if pitch_phase < 1.0 else 2.0 - pitch_phase
-        target_pitch = PITCH_MIN + triangle * (PITCH_MAX - PITCH_MIN)
-        target_yaw = SWEEP_YAW_CENTER + SWEEP_YAW_AMP * math.sin(self.sweep_angle * SWEEP_YAW_FREQ)
+        yaw_phase = (self.sweep_angle / math.pi) % 2.0
+        triangle = yaw_phase if yaw_phase < 1.0 else 2.0 - yaw_phase
+        target_yaw = YAW_MIN + triangle * (YAW_MAX - YAW_MIN)
+        target_pitch = SWEEP_PITCH_CENTER + SWEEP_PITCH_AMP * math.sin(self.sweep_angle * SWEEP_PITCH_FREQ)
 
         self.current_pitch = self._move_toward(
             self.current_pitch,
