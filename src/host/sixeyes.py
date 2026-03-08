@@ -153,12 +153,16 @@ class ConstantVelocityKalmanFilter:
             [0.0, dt3 / 2.0, 0.0, dt2],
         ], dtype=np.float64)
 
-    def predict(self, dt: float) -> Optional[tuple[float, float]]:
+    def predict(self, dt: float, dx: float = 0.0, dy: float = 0.0) -> Optional[tuple[float, float]]:
         if not self.initialized:
             return None
 
         transition = self._transition_matrix(dt)
         self.state = transition @ self.state
+        # Compensate for known camera ego-motion so the filter does not mistake
+        # pixel displacement caused by servo movement for target motion.
+        self.state[0, 0] += dx
+        self.state[1, 0] += dy
         self.covariance = (
             transition @ self.covariance @ transition.T
             + self._process_covariance(dt)
@@ -201,17 +205,19 @@ class ConstantVelocityKalmanFilter:
         self,
         dt: float,
         measurement: Optional[tuple[float, float]],
+        dx: float = 0.0,
+        dy: float = 0.0,
     ) -> Optional[tuple[float, float]]:
         dt = clamp(dt, MIN_FRAME_DT_SECONDS, MAX_FRAME_DT_SECONDS)
 
         if measurement is None:
-            return self.predict(dt)
+            return self.predict(dt, dx, dy)
 
         if not self.initialized:
             self.initialize(*measurement)
             return self.position()
 
-        self.predict(dt)
+        self.predict(dt, dx, dy)
         return self.correct(*measurement)
 
     def position(self) -> tuple[float, float]:
@@ -389,6 +395,8 @@ class PanTiltTracker:
 
         self.current_pitch = clamp(90.0, PITCH_MIN, PITCH_MAX)
         self.current_yaw = clamp(90.0, YAW_MIN, YAW_MAX)
+        self._prev_yaw = self.current_yaw
+        self._prev_pitch = self.current_pitch
         self.state = "SWEEP"
         self.lost_frames = LOST_FRAMES_THRESHOLD
         self.sweep_angle = 0.0
@@ -410,6 +418,18 @@ class PanTiltTracker:
 
     def update(self, detections: Sequence[Detection], dt: float) -> TrackerTelemetry:
         dt = clamp(dt, MIN_FRAME_DT_SECONDS, MAX_FRAME_DT_SECONDS)
+
+        # Ego-motion compensation: convert servo delta (degrees) to expected
+        # pixel displacement of a stationary target in the frame.
+        # Sign convention: increasing yaw rotates the camera so targets shift
+        # in the -x direction; increasing pitch shifts targets in the -y direction.
+        delta_yaw = self.current_yaw - self._prev_yaw
+        delta_pitch = self.current_pitch - self._prev_pitch
+        ego_dx = delta_yaw * self.px_per_deg_x
+        ego_dy = -delta_pitch * self.px_per_deg_y
+        self._prev_yaw = self.current_yaw
+        self._prev_pitch = self.current_pitch
+
         target = self._select_target(detections)
         estimate: Optional[tuple[float, float]] = None
         aim_point: Optional[tuple[float, float]] = None
@@ -423,10 +443,10 @@ class PanTiltTracker:
                 self.pid_pitch.reset()
             self.state = "TRACK"
             self.lost_frames = 0
-            estimate = self.kalman.update(dt, (target.center_x, target.center_y))
+            estimate = self.kalman.update(dt, (target.center_x, target.center_y), ego_dx, ego_dy)
         elif self.state == "TRACK":
             self.lost_frames += 1
-            estimate = self.kalman.update(dt, None)
+            estimate = self.kalman.update(dt, None, ego_dx, ego_dy)
             if self.lost_frames >= LOST_FRAMES_THRESHOLD or estimate is None:
                 self._enter_sweep()
                 estimate = None
