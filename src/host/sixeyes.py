@@ -13,7 +13,8 @@ from ultralytics import YOLO
 # --- Configuration carried over from the previous script ---
 SERIAL_PORT = "/dev/ttyUSB0"
 BAUD_RATE = 115200
-MODEL_PATH = "faces.pt"
+MODEL_PATH = "yolo11m.pt"
+TARGET_LABEL = "bottle"
 CAMERA_INDEX = 0
 CAMERA_BACKEND = cv2.CAP_V4L2
 FRAME_ROTATION = cv2.ROTATE_90_COUNTERCLOCKWISE
