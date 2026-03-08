@@ -425,8 +425,11 @@ class PanTiltTracker:
         # in the -x direction; increasing pitch shifts targets in the -y direction.
         delta_yaw = self.current_yaw - self._prev_yaw
         delta_pitch = self.current_pitch - self._prev_pitch
-        ego_dx = delta_yaw * self.px_per_deg_x
-        ego_dy = -delta_pitch * self.px_per_deg_y
+        if self.state == "TRACK":
+            ego_dx = delta_yaw * self.px_per_deg_x
+            ego_dy = -delta_pitch * self.px_per_deg_y
+        else:
+            ego_dx = ego_dy = 0.0
         self._prev_yaw = self.current_yaw
         self._prev_pitch = self.current_pitch
 
