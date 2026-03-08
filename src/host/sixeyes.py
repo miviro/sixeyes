@@ -29,7 +29,7 @@ DEADBAND_PIXELS = 20
 LOST_FRAMES_THRESHOLD = 20
 
 # Search pattern: pitch triangle wave, yaw sinusoid around centre
-SWEEP_SPEED = 0.05
+SWEEP_SPEED = 0.01
 SWEEP_PITCH_CENTER = (PITCH_MIN + PITCH_MAX) / 2.0
 SWEEP_PITCH_AMP = 20.0
 SWEEP_PITCH_FREQ = 6.0
@@ -356,6 +356,8 @@ class YoloDetector:
 
                 class_id = int(classes[index]) if classes[index] >= 0 else None
                 label = self._label_for(names, class_id)
+                if label != TARGET_LABEL:
+                    continue
                 detections.append(
                     Detection(
                         x1=float(x1),
