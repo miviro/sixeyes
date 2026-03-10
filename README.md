@@ -1,60 +1,73 @@
 # SixEyes
 
-Prototype pipeline for dual-camera drone tracking with YOLO + ByteTrack and stereo triangulation.
+# Webcam resolution
+The Creative Live! CAM Sync 1080P V2 can capture different resolutions at different fps:
+```
+v4l2-ctl --list-formats-ext -d /dev/video0 
+ioctl: VIDIOC_ENUM_FMT
+	Type: Video Capture
 
-## Quick start
-
-1) Put your YOLO `.pt` file in `model/` and update `config.yaml`.
-2) Install dependencies:
-
-```bash
-pip install -r requirements.txt
+	[0]: 'MJPG' (Motion-JPEG, compressed)
+		Size: Discrete 1920x1080
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 640x480
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 544x288
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 320x240
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 432x240
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 160x120
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 800x600
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 864x480
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 960x720
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 1024x576
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 1280x720
+			Interval: Discrete 0.033s (30.000 fps)
+	[1]: 'YUYV' (YUYV 4:2:2)
+		Size: Discrete 1920x1080
+			Interval: Discrete 0.200s (5.000 fps)
+		Size: Discrete 640x480
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 544x288
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 320x240
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 432x240
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 160x120
+			Interval: Discrete 0.033s (30.000 fps)
+		Size: Discrete 800x600
+			Interval: Discrete 0.050s (20.000 fps)
+		Size: Discrete 864x480
+			Interval: Discrete 0.050s (20.000 fps)
+		Size: Discrete 960x720
+			Interval: Discrete 0.080s (12.500 fps)
+		Size: Discrete 1024x576
+			Interval: Discrete 0.067s (15.000 fps)
+		Size: Discrete 1280x720
+			Interval: Discrete 0.100s (10.000 fps)
 ```
 
-3) Run:
+For the sake of YOLOv11, we will go for 30fps, so that leaves us with 640x480@30 as the best choice.
 
-```bash
-python run.py --config config.yaml
+# Latency justification
+Since we want to operate at 30fps, that leaves us with a margin of 1/30s=33.33ms per frame.
+
+On average, on the desktop PC (RTX 3070 Ti), we have these timings:
 ```
-
-## Notes
-
-- Inputs are source-agnostic: camera indices (e.g., `0`, `1`), file paths, or stream URLs.
-- Tracking uses Ultralytics' ByteTrack integration per camera.
-- Stereo triangulation requires a calibration file. Use `calibration/stereo_template.yaml` as a template.
-- Without calibration, the program prints `nan` for XYZ.
-                                                                                                                                            
-  Step 1 — Verify the sign first (before tuning anything)                                                                                     
-                                                                                                                                              
-  Stand centred in frame. Move your head right. Watch what the servo does:                                                                    
-  - If it turns right (chasing you) → sign is correct, proceed to tuning                                                                      
-  - If it turns left (running away) → flip the sign: current_yaw += instead of -=
-
-  A wrong sign makes the loop unstable no matter how small KP is.
-
-  ---
-  Step 2 — Tune KP alone (KI=KD=0)
-
-  Start extremely small and double upward:
-  0.001 → 0.002 → 0.005 → 0.01 → 0.02 → 0.05
-  At each step: does it track sluggishly? → go higher. Does it oscillate? → go back one step. The sweet spot is the largest value that doesn't
-   oscillate.
-
-  ---
-  Step 3 — Add KD to damp overshoot
-
-  Once KP is set, increase KD gradually (~3–10× KP) until overshoot disappears:
-  YAW_KD = YAW_KP * 5   # starting point
-
-  ---
-  Step 4 — Add KI last, only if there's a steady-state offset
-
-  If the face settles slightly off-centre, add a tiny KI:
-  YAW_KI = YAW_KP * 0.1   # starting point
-
-  ---
-  Practical note on your current setup
-
-  At KP=0.005 you should be getting at most ~1.5°/frame of correction (for a 300px error). If it's still bouncing at that, the most likely
-  cause is detection noise — the bounding box jittering frame-to-frame feeds jittery errors into the P term. That's the scenario where
-  bringing the Kalman filter back makes the most sense.
+0: 480x640 1 person, 8.2ms
+Speed: 0.6ms preprocess, 8.2ms inference, 1.5ms postprocess per image at shape (1, 3, 480, 640)
+```
+Of which we only care about the *8.2ms* inference.
+Then, to send a coordinate via serial, neglecting processing time:
+```
+3 bytes (0xFF, 0xPT, 0xYW) / 115200baud@1s8d1s = 260us
+```
+Let's consider it 1ms to account for kernel/controller latency.

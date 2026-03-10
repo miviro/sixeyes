@@ -23,17 +23,9 @@ class ESP32SerialLink:
     def send(self, pitch: float, yaw: float) -> None:
         pitch_byte = int(round(clamp(pitch, 0.0, 180.0)))
         yaw_byte = int(round(clamp(yaw, 0.0, 180.0)))
-        # Keep only the freshest command; stale pan/tilt updates are worse than drops.
         self.serial.reset_output_buffer()
         self.serial.write(bytes([0xFF, pitch_byte, yaw_byte]))
         self.serial.flush()
-
-    def send_immediate(self, pitch: float, yaw: float) -> None:
-        try:
-            self.serial.reset_input_buffer()
-        except serial.SerialException:
-            pass
-        self.send(pitch, yaw)
 
     def close(self) -> None:
         if not self.serial.is_open:

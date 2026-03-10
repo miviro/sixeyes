@@ -6,7 +6,7 @@ PYTHON ?= python3
 
 .PHONY: run flash start
 
-run: flash start
+all: flash start
 
 flash:
 	arduino-cli compile --fqbn $(FQBN) $(SKETCH)

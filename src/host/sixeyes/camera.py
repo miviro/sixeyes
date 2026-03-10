@@ -18,7 +18,6 @@ def open_camera() -> cv2.VideoCapture:
     if capture.isOpened():
         return capture
 
-    # Fix: release before raising so the VideoCapture object is not leaked
     capture.release()
     raise RuntimeError(f"Could not open camera index {CAMERA_INDEX}")
 

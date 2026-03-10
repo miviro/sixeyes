@@ -74,7 +74,7 @@ def main() -> None:
         neutral_yaw = clamp(90.0, YAW_MIN, YAW_MAX)
         try:
             if serial_link is not None:
-                serial_link.send_immediate(neutral_pitch, neutral_yaw)
+                serial_link.send(neutral_pitch, neutral_yaw)
         except Exception:
             pass
         if capture is not None:
