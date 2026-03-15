@@ -1,8 +1,19 @@
 import cv2
 import numpy as np
-from lstm import FRAME_W, FRAME_H, PRED_STEPS, SEQ_LEN, calibrating_remaining
+from lstm import FRAME_W, FRAME_H, HFOV_DEG, VFOV_DEG, PRED_STEPS, SEQ_LEN, calibrating_remaining
 
-def draw_track(frame, tid, cx, cy, w, h, history, pred):
+
+def _world_to_px(world_yaw: float, world_pitch: float,
+                 servo_yaw: float, servo_pitch: float) -> tuple[int, int]:
+    """Project a world-space angle back to pixel coordinates."""
+    cx_norm = 0.5 - (world_yaw   - servo_yaw)   / HFOV_DEG
+    cy_norm = 0.5 + (world_pitch - servo_pitch)  / VFOV_DEG
+    px = int(np.clip(cx_norm * FRAME_W, 0, FRAME_W - 1))
+    py = int(np.clip(cy_norm * FRAME_H, 0, FRAME_H - 1))
+    return px, py
+
+
+def draw_track(frame, tid, cx, cy, w, h, history, pred, servo_yaw: float, servo_pitch: float):
     x1, y1 = int(cx - w / 2), int(cy - h / 2)
     x2, y2 = int(cx + w / 2), int(cy + h / 2)
 
@@ -11,14 +22,13 @@ def draw_track(frame, tid, cx, cy, w, h, history, pred):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
     if len(history) >= 2:
-        pts = [(int(f[0] * FRAME_W), int(f[1] * FRAME_H)) for f in history]
+        pts = [_world_to_px(f[0], f[1], servo_yaw, servo_pitch) for f in history]
         for i in range(1, len(pts)):
             alpha = i / len(pts)
             cv2.line(frame, pts[i - 1], pts[i], (0, int(200 * alpha), 255), 1)
 
     if pred is not None:
-        px  = int(np.clip(pred[0] * FRAME_W, 0, FRAME_W - 1))
-        py  = int(np.clip(pred[1] * FRAME_H, 0, FRAME_H - 1))
+        px, py = _world_to_px(pred[0], pred[1], servo_yaw, servo_pitch)
         cv2.arrowedLine(frame, (int(cx), int(cy)), (px, py), (0, 0, 255), 2, tipLength=0.25)
         cv2.circle(frame, (px, py), 7, (0, 0, 255), -1)
         cv2.circle(frame, (px, py), 7, (255, 255, 255), 1)
@@ -27,6 +37,7 @@ def draw_track(frame, tid, cx, cy, w, h, history, pred):
     else:
         cv2.putText(frame, f"cal -{calibrating_remaining(tid)}", (x1, y2 + 14),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 0), 1)
+
 
 def draw_hud(frame):
     cv2.putText(frame, "Trajectory", (8, 20),

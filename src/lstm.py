@@ -5,6 +5,8 @@ from collections import defaultdict
 
 FRAME_W    = 1920
 FRAME_H    = 1080
+HFOV_DEG   = 69.3
+VFOV_DEG   = 42.4
 SEQ_LEN    = 20
 MIN_SEQ    = 8
 PRED_STEPS = 5
@@ -32,8 +34,20 @@ track_history:  dict = defaultdict(list)
 track_ema_in:   dict = {}
 track_ema_pred: dict = {}
 
-def to_norm(cx, cy, w, h):
-    return [cx / FRAME_W, cy / FRAME_H, w / FRAME_W, h / FRAME_H]
+def to_world(cx, cy, w, h, servo_yaw: float, servo_pitch: float) -> list:
+    """Convert pixel detection to world-space feature vector.
+
+    World angles are absolute (independent of where the camera is pointing),
+    so the LSTM sees true target motion rather than ego-motion artefacts.
+
+    Yaw convention matches aiming.py (yaw is flipped):
+        world_yaw = servo_yaw + (0.5 - cx_norm) * HFOV_DEG
+    """
+    cx_norm = cx / FRAME_W
+    cy_norm = cy / FRAME_H
+    world_yaw   = servo_yaw   + (0.5 - cx_norm) * HFOV_DEG
+    world_pitch = servo_pitch + (cy_norm - 0.5)  * VFOV_DEG
+    return [world_yaw, world_pitch, w / FRAME_W, h / FRAME_H]
 
 def train_step(history: list, new_obs: list):
     """Train model to predict delta from last history position to new_obs."""
@@ -61,8 +75,9 @@ def predict_future(history: list) -> np.ndarray:
             seq = torch.cat([seq[:, 1:], next_feat], dim=1)
     return pos
 
-def update_track(tid: int, cx: float, cy: float, w: float, h: float):
-    raw = to_norm(cx, cy, w, h)
+def update_track(tid: int, cx: float, cy: float, w: float, h: float,
+                 servo_yaw: float, servo_pitch: float):
+    raw = to_world(cx, cy, w, h, servo_yaw, servo_pitch)
 
     # EMA smoothing on input
     if tid not in track_ema_in:
