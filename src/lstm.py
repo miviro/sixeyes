@@ -76,7 +76,7 @@ def predict_future(history: list) -> np.ndarray:
     return pos
 
 def update_track(tid: int, cx: float, cy: float, w: float, h: float,
-                 servo_yaw: float, servo_pitch: float):
+                 servo_yaw: float, servo_pitch: float, servo_moving: bool = False):
     raw = to_world(cx, cy, w, h, servo_yaw, servo_pitch)
 
     # EMA smoothing on input
@@ -89,15 +89,22 @@ def update_track(tid: int, cx: float, cy: float, w: float, h: float,
     feat    = track_ema_in[tid]
     history = track_history[tid]
 
-    if len(history) >= MIN_SEQ:
-        train_step(history, feat)
+    if not servo_moving:
+        # Only train and accumulate history when the camera is still —
+        # ego-motion during a slew would corrupt the world-space observations.
+        if len(history) >= MIN_SEQ:
+            train_step(history, feat)
 
-    history.append(feat)
-    if len(history) > SEQ_LEN + 5:
-        del history[0]
+        history.append(feat)
+        if len(history) > SEQ_LEN + 5:
+            del history[0]
 
     if len(history) < MIN_SEQ:
         return None
+
+    if servo_moving:
+        # Return the last cached prediction rather than re-running the LSTM
+        return track_ema_pred.get(tid)
 
     raw_pred = predict_future(history)
 

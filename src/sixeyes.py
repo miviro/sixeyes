@@ -3,7 +3,7 @@ import cv2
 from ultralytics import YOLO
 from lstm import FRAME_W, FRAME_H, update_track, track_history
 from drawing import draw_track, draw_hud
-from aiming import init_serial, update_estimated_angles, aim
+from aiming import init_serial, update_estimated_angles, aim, is_servo_moving
 
 yolo = YOLO("faces.pt")
 init_serial("/dev/ttyUSB0")
@@ -35,8 +35,9 @@ while cap.isOpened():
         boxes = results[0].boxes.xywh.cpu().numpy()
         tids  = results[0].boxes.id.cpu().numpy().astype(int)
 
+        moving = is_servo_moving()
         for (cx, cy, w, h), tid in zip(boxes, tids):
-            pred = update_track(tid, cx, cy, w, h, servo_yaw, servo_pitch)
+            pred = update_track(tid, cx, cy, w, h, servo_yaw, servo_pitch, moving)
             draw_track(frame, tid, cx, cy, w, h, track_history[tid], pred,
                        servo_yaw, servo_pitch)
             if pred is not None:

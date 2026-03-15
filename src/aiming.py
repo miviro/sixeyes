@@ -13,10 +13,10 @@ PITCH_MIN, PITCH_MAX =  0.0, 140.0
 SERVO_SPEED_DEG_S = 300.0
 
 # How often to send a new aim command (seconds)
-SEND_INTERVAL = 1.0
+SEND_INTERVAL = 0.5
 
 # Deadband: ignore target if it's within this many degrees of current estimated position
-DEADBAND_DEG = 10.0
+DEADBAND_DEG = 5.0
 
 _ser: serial.Serial | None = None
 _last_send = 0.0
@@ -51,6 +51,12 @@ def update_estimated_angles(dt: float) -> tuple[float, float]:
     _est_yaw   = step(_est_yaw,   _cmd_yaw)
     _est_pitch = step(_est_pitch, _cmd_pitch)
     return _est_yaw, _est_pitch
+
+
+def is_servo_moving() -> bool:
+    """Return True while the servo hasn't reached its commanded position yet."""
+    return (abs(_est_yaw - _cmd_yaw) > 0.5 or
+            abs(_est_pitch - _cmd_pitch) > 0.5)
 
 
 def aim(world_yaw: float, world_pitch: float) -> None:
