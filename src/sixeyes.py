@@ -3,6 +3,7 @@ import cv2
 from ultralytics import YOLO
 from lstm import FRAME_W, FRAME_H, update_track, track_history
 from drawing import draw_track, draw_hud
+import aiming
 from aiming import init_serial, update_estimated_angles, aim
 
 yolo = YOLO("faces.pt")
@@ -21,8 +22,8 @@ while cap.isOpened():
     if not ok:
         break
 
-    now   = time.monotonic()
-    dt    = now - prev_t
+    now    = time.monotonic()
+    dt     = now - prev_t
     prev_t = now
 
     # Advance servo kinematic model — gives the angle the camera is actually
@@ -36,12 +37,14 @@ while cap.isOpened():
         tids  = results[0].boxes.id.cpu().numpy().astype(int)
 
         for (cx, cy, w, h), tid in zip(boxes, tids):
+            # LSTM: update history and get prediction for visualisation only
             pred = update_track(tid, cx, cy, w, h, servo_yaw, servo_pitch)
             draw_track(frame, tid, cx, cy, w, h, track_history[tid], pred,
-                       servo_yaw, servo_pitch)
-            if pred is not None:
-                aim(pred[0], pred[1])
-                break  # aim at the first tracked face only
+                       servo_yaw, servo_pitch, aiming.locked)
+
+            # P-controller: drive purely from pixel error, no servo estimate needed
+            aim(cx / FRAME_W, cy / FRAME_H)
+            break  # track first face only
 
     draw_hud(frame)
     cv2.imshow("sixeyes", frame)

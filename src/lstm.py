@@ -110,5 +110,15 @@ def update_track(tid: int, cx: float, cy: float, w: float, h: float,
 
     return track_ema_pred[tid]
 
+def reset_track(tid: int) -> None:
+    """Discard history and EMA state for one track after a servo command.
+
+    Forces recalibration from the new camera position so stale velocity
+    estimates don't drive the servo back where it came from.
+    """
+    track_history.pop(tid, None)
+    track_ema_in.pop(tid, None)
+    track_ema_pred.pop(tid, None)
+
 def calibrating_remaining(tid: int) -> int:
     return max(0, MIN_SEQ - len(track_history[tid]))

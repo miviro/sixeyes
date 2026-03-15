@@ -1,4 +1,3 @@
-import time
 import serial
 from lstm import HFOV_DEG, VFOV_DEG  # noqa: F401 — re-exported for drawing.py
 
@@ -12,19 +11,28 @@ PITCH_MIN, PITCH_MAX =  0.0, 140.0
 # Under typical load assume roughly half that.
 SERVO_SPEED_DEG_S = 300.0
 
-# How often to send a new aim command (seconds)
-SEND_INTERVAL = 1.0
+# Proportional gain applied to the angular pixel error each frame.
+# 1.0 = move the full error in one step (servo physical speed is the only limit).
+# 0.5 = close half the remaining error per frame — smoother, slightly laggier.
+KP = 0.5
+
+# Ignore errors smaller than this (degrees) — mechanical noise floor of the SG90.
+DEADBAND_DEG = 2.0
 
 _ser: serial.Serial | None = None
-_last_send = 0.0
 
-# Last commanded angles
+# Float commands — fractional degrees are preserved between frames.
+# Only cast to int at the point of the serial write.
 _cmd_yaw   = YAW_CENTER
 _cmd_pitch = PITCH_CENTER
 
-# Estimated current angles — updated every frame via update_estimated_angles()
+# Estimated current angles — updated every frame via update_estimated_angles().
+# Used only for world-space LSTM visualisation, NOT for the P-controller target.
 _est_yaw   = YAW_CENTER
 _est_pitch = PITCH_CENTER
+
+# True when the latest face was inside the deadband (no command sent)
+locked = True
 
 
 def init_serial(port: str = "/dev/ttyUSB0", baud: int = 115200) -> None:
@@ -35,8 +43,8 @@ def init_serial(port: str = "/dev/ttyUSB0", baud: int = 115200) -> None:
 def update_estimated_angles(dt: float) -> tuple[float, float]:
     """Advance the servo position estimate by dt seconds toward the commanded angles.
 
-    Returns the estimated (yaw, pitch) the camera is currently pointing at.
-    Call this once per frame before using the angles for world-space conversion.
+    Returns estimated (yaw, pitch). Used only for world-space conversion in the
+    LSTM visualisation — the P-controller drives from pixel error, not this estimate.
     """
     global _est_yaw, _est_pitch
     max_move = SERVO_SPEED_DEG_S * dt
@@ -50,24 +58,34 @@ def update_estimated_angles(dt: float) -> tuple[float, float]:
     return _est_yaw, _est_pitch
 
 
-def aim(world_yaw: float, world_pitch: float) -> None:
-    """Send servo frame for the predicted world-space target position.
+def aim(cx_norm: float, cy_norm: float) -> None:
+    """P-controller step driven purely from pixel error — no servo estimate involved.
 
-    world_yaw / world_pitch come directly from the LSTM prediction, which
-    already operates in world-space angles — no pixel conversion needed.
+    cx_norm / cy_norm: normalised face position in frame [0, 1].
+    Converts pixel offset from centre to angular error using the camera FOV,
+    then nudges the servo command by KP * error each frame.
+    Float commands are accumulated internally; only truncated to int on serial write
+    so sub-degree corrections are not discarded between frames.
     """
-    global _last_send, _cmd_yaw, _cmd_pitch
+    global _cmd_yaw, _cmd_pitch, locked
 
-    now = time.monotonic()
-    if now - _last_send < SEND_INTERVAL:
+    # Angular distance the face is from the frame centre
+    error_yaw   = (cx_norm - 0.5) * HFOV_DEG   # positive → face right of centre
+    error_pitch = (cy_norm - 0.5) * VFOV_DEG   # positive → face below centre
+
+    if abs(error_yaw) < DEADBAND_DEG and abs(error_pitch) < DEADBAND_DEG:
+        locked = True
         return
-    _last_send = now
 
-    yaw   = int(max(YAW_MIN,   min(YAW_MAX,   world_yaw)))
-    pitch = int(max(PITCH_MIN, min(PITCH_MAX, world_pitch)))
+    locked = False
 
-    _cmd_yaw   = float(yaw)
-    _cmd_pitch = float(pitch)
+    # Yaw is flipped: face right of centre → pan right → decrease yaw
+    _cmd_yaw   -= KP * error_yaw
+    _cmd_pitch += KP * error_pitch
+
+    # Clamp — keep as float to preserve fractional degrees
+    _cmd_yaw   = max(YAW_MIN,   min(YAW_MAX,   _cmd_yaw))
+    _cmd_pitch = max(PITCH_MIN, min(PITCH_MAX,  _cmd_pitch))
 
     if _ser and _ser.is_open:
-        _ser.write(bytes([0xFF, pitch, yaw]))
+        _ser.write(bytes([0xFF, int(_cmd_pitch), int(_cmd_yaw)]))

@@ -13,7 +13,8 @@ def _world_to_px(world_yaw: float, world_pitch: float,
     return px, py
 
 
-def draw_track(frame, tid, cx, cy, w, h, history, pred, servo_yaw: float, servo_pitch: float):
+def draw_track(frame, tid, cx, cy, w, h, history, pred,
+               servo_yaw: float, servo_pitch: float, locked: bool = False):
     x1, y1 = int(cx - w / 2), int(cy - h / 2)
     x2, y2 = int(cx + w / 2), int(cy + h / 2)
 
@@ -28,12 +29,14 @@ def draw_track(frame, tid, cx, cy, w, h, history, pred, servo_yaw: float, servo_
             cv2.line(frame, pts[i - 1], pts[i], (0, int(200 * alpha), 255), 1)
 
     if pred is not None:
-        px, py = _world_to_px(pred[0], pred[1], servo_yaw, servo_pitch)
-        cv2.arrowedLine(frame, (int(cx), int(cy)), (px, py), (0, 0, 255), 2, tipLength=0.25)
-        cv2.circle(frame, (px, py), 7, (0, 0, 255), -1)
+        px, py  = _world_to_px(pred[0], pred[1], servo_yaw, servo_pitch)
+        color   = (0, 200, 0) if locked else (0, 0, 255)
+        tag     = "LOCK" if locked else "AIM"
+        cv2.arrowedLine(frame, (int(cx), int(cy)), (px, py), color, 2, tipLength=0.25)
+        cv2.circle(frame, (px, py), 7, color, -1)
         cv2.circle(frame, (px, py), 7, (255, 255, 255), 1)
-        cv2.putText(frame, f"t+{PRED_STEPS / 30:.1f}s", (px + 9, py - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+        cv2.putText(frame, f"{tag}  t+{PRED_STEPS / 30:.1f}s", (px + 9, py - 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
     else:
         cv2.putText(frame, f"cal -{calibrating_remaining(tid)}", (x1, y2 + 14),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 0), 1)
