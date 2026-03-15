@@ -15,6 +15,9 @@ SERVO_SPEED_DEG_S = 300.0
 # How often to send a new aim command (seconds)
 SEND_INTERVAL = 1.0
 
+# Deadband: ignore target if it's within this many degrees of current estimated position
+DEADBAND_DEG = 10.0
+
 _ser: serial.Serial | None = None
 _last_send = 0.0
 
@@ -57,6 +60,11 @@ def aim(world_yaw: float, world_pitch: float) -> None:
     already operates in world-space angles — no pixel conversion needed.
     """
     global _last_send, _cmd_yaw, _cmd_pitch
+
+    # Skip if target is within the deadband around current estimated position
+    if (abs(world_yaw - _est_yaw) <= DEADBAND_DEG and
+            abs(world_pitch - _est_pitch) <= DEADBAND_DEG):
+        return
 
     now = time.monotonic()
     if now - _last_send < SEND_INTERVAL:

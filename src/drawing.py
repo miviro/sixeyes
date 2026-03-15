@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from lstm import FRAME_W, FRAME_H, HFOV_DEG, VFOV_DEG, PRED_STEPS, SEQ_LEN, calibrating_remaining
+from aiming import DEADBAND_DEG
 
 
 def _world_to_px(world_yaw: float, world_pitch: float,
@@ -44,3 +45,15 @@ def draw_hud(frame):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
     cv2.putText(frame, f"seq={SEQ_LEN}  pred=+{PRED_STEPS}f ({PRED_STEPS/30:.1f}s)",
                 (8, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
+
+    # Deadband rectangle — region where servo won't move
+    db_half_w = int(DEADBAND_DEG / HFOV_DEG * FRAME_W)
+    db_half_h = int(DEADBAND_DEG / VFOV_DEG * FRAME_H)
+    cx, cy = FRAME_W // 2, FRAME_H // 2
+    cv2.rectangle(frame,
+                  (cx - db_half_w, cy - db_half_h),
+                  (cx + db_half_w, cy + db_half_h),
+                  (0, 180, 255), 1)
+    cv2.putText(frame, f"db={DEADBAND_DEG:.1f}deg",
+                (cx - db_half_w, cy - db_half_h - 4),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 180, 255), 1)
