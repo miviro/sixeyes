@@ -5,8 +5,10 @@ from drawing import draw_track, draw_hud
 
 yolo = YOLO("faces.pt")
 cap  = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
 cap.set(cv2.CAP_PROP_FRAME_WIDTH,  FRAME_W)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
+cap.set(cv2.CAP_PROP_FPS, 30)
 
 while cap.isOpened():
     ok, frame = cap.read()

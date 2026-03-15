@@ -3,8 +3,8 @@ import torch
 import torch.nn as nn
 from collections import defaultdict
 
-FRAME_W    = 640
-FRAME_H    = 480
+FRAME_W    = 1920
+FRAME_H    = 1080
 SEQ_LEN    = 20
 MIN_SEQ    = 8
 PRED_STEPS = 5

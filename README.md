@@ -55,7 +55,7 @@ ioctl: VIDIOC_ENUM_FMT
 			Interval: Discrete 0.100s (10.000 fps)
 ```
 
-For the sake of YOLOv11, we will go for 30fps, so that leaves us with 640x480@30 as the best choice.
+For the sake of YOLOv11, we will go for 30fps, so that leaves us with 1920x1080@30 as the best choice.
 
 # Latency justification
 Since we want to operate at 30fps, that leaves us with a margin of 1/30s=33.33ms per frame.
