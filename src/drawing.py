@@ -19,6 +19,7 @@ def draw_track(frame, tid, cx, cy, w, h, history, pred, servo_yaw: float, servo_
     x2, y2 = int(cx + w / 2), int(cy + h / 2)
 
     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    cv2.circle(frame, (int(cx), int(cy)), 4, (0, 255, 0), -1)
     cv2.putText(frame, f"ID {tid}", (x1, y1 - 6),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
@@ -40,11 +41,30 @@ def draw_track(frame, tid, cx, cy, w, h, history, pred, servo_yaw: float, servo_
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 0), 1)
 
 
-def draw_hud(frame):
-    cv2.putText(frame, "Trajectory", (8, 20),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
-    cv2.putText(frame, f"seq={SEQ_LEN}  pred=+{PRED_STEPS}f ({PRED_STEPS/30:.1f}s)",
-                (8, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
+def draw_sweep_hud(frame, patience: int = 0):
+    if patience > 0:
+        cv2.putText(frame, f"sweep in {patience} steps", (8, 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 180, 255), 1)
+    else:
+        cv2.putText(frame, "SWEEP", (8, 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 140, 255), 2)
+        cv2.putText(frame, "searching...", (8, 42),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 140, 255), 1)
+
+
+def draw_hud(frame, sweeping: bool = False, lstm_on: bool = True, patience: int = 0):
+    if sweeping or patience > 0:
+        draw_sweep_hud(frame, patience=patience)
+    else:
+        cv2.putText(frame, "Trajectory", (8, 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+        cv2.putText(frame, f"seq={SEQ_LEN}  pred=+{PRED_STEPS}f ({PRED_STEPS/30:.1f}s)",
+                    (8, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
+
+    lstm_label = "LSTM: ON" if lstm_on else "LSTM: OFF"
+    lstm_color = (0, 220, 0) if lstm_on else (0, 0, 220)
+    cv2.putText(frame, lstm_label + "  [L]", (8, FRAME_H - 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, lstm_color, 1)
 
     # Deadband rectangle — region where servo won't move
     db_half_w = int(DEADBAND_DEG / HFOV_DEG * FRAME_W)
