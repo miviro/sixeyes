@@ -2,9 +2,8 @@ PORT   ?= /dev/ttyUSB0
 FQBN   ?= esp32:esp32:esp32
 SKETCH := src/esp32
 SCRIPT := src/host/sixeyes.py
-PYTHON ?= python3
 
-.PHONY: run flash start
+.PHONY: run flash start sync
 
 all: flash start
 
@@ -13,4 +12,4 @@ flash:
 	arduino-cli upload  --fqbn $(FQBN) --port $(PORT) $(SKETCH)
 
 start:
-	$(PYTHON) $(SCRIPT)
+	uv run python $(SCRIPT)

@@ -1,7 +1,8 @@
 # SixEyes
 ## Installation
 ### Dependencies
-Run the following
+Install `arduino-cli` and `uv` via the package manager of your choice. We also need Python3's `cv2` package, which we can get by running `uv sync`. Source the `uv` environment.
+Then, run the following
 ```bash
 curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh`
 arduino-cli config init
