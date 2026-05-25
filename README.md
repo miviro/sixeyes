@@ -1,6 +1,20 @@
 # SixEyes
-
-# Webcam resolution
+## Installation
+### Nix
+Nix users may just use the `nix.shell` file to get all needed dependencies.
+### Others
+Install `arduino-cli` and `uv` via the package manager of your choice. We also need Python3's `cv2` package, which we can get by running `uv sync`. Source the `uv` environment.
+Then, run the following
+```bash
+curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh`
+arduino-cli config init
+arduino-cli config add board_manager.additional_urls https://github.com/Heltec-Aaron-Lee/WiFi_Kit_series/releases/download/3.3.8/package_heltec_esp32_index.json
+arduino-cli core update-index --config-file ~/.arduino15/arduino-cli.yaml
+arduino-cli core install esp32:esp32
+```
+## Running
+Run `make all` or see targets in the Makefile.
+## Webcam resolution
 The Creative Live! CAM Sync 1080P V2 can capture different resolutions at different fps:
 ```
 v4l2-ctl --list-formats-ext -d /dev/video0 

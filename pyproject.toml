@@ -1,0 +1,14 @@
+[project]
+name = "sixeyes"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "opencv-python",
+    "pyserial",
+    "ultralytics",
+]
+
+[tool.uv]
+package = false
+python-downloads = "never"
