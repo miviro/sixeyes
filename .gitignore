@@ -1,3 +1,4 @@
 model/
 *.pt
 __pycache__/
+bin/

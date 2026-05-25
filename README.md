@@ -1,6 +1,20 @@
 # SixEyes
-
-# Webcam resolution
+## Installation
+### Dependencies
+Run the following
+```bash
+curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh`
+arduino-cli config init
+arduino-cli config add board_manager.additional_urls https://github.com/Heltec-Aaron-Lee/WiFi_Kit_series/releases/download/3.3.8/package_heltec_esp32_index.json
+arduino-cli core update-index --config-file ~/.arduino15/arduino-cli.yaml
+arduino-cli core install esp32:esp32
+arduino-cli core install Heltec-esp32:esp32
+arduino-cli lib install "U8g2"
+arduino-cli lib install RadioLib
+```
+### Compilation and running
+Run `make all` or see targets in the Makefile.
+## Webcam resolution
 The Creative Live! CAM Sync 1080P V2 can capture different resolutions at different fps:
 ```
 v4l2-ctl --list-formats-ext -d /dev/video0 
@@ -57,7 +71,7 @@ ioctl: VIDIOC_ENUM_FMT
 
 For the sake of YOLOv11, we will go for 30fps, so that leaves us with 640x480@30 as the best choice.
 
-# Latency justification
+## Latency justification
 Since we want to operate at 30fps, that leaves us with a margin of 1/30s=33.33ms per frame.
 
 On average, on the desktop PC (RTX 3070 Ti), we have these timings:
