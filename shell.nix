@@ -1,8 +1,8 @@
-{ pkgs ? import <nixpkgs> { } }:
+{ pkgs ? import <nixpkgs> { config.allowUnfree = true; } }:
 pkgs.mkShell {
-  packages = [ pkgs.uv ];
+  packages = [ pkgs.uv pkgs.cudaPackages.cudatoolkit ];
 
-  LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+  LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath [
     pkgs.stdenv.cc.cc.lib  # libstdc++.so.6
     pkgs.zlib               # libz.so.1
     pkgs.xorg.libxcb        # libxcb.so.1
@@ -12,5 +12,7 @@ pkgs.mkShell {
     pkgs.xorg.libX11        # libX11.so.6
     pkgs.xorg.libSM         # libSM.so.6
     pkgs.xorg.libICE        # libICE.so.6
-  ];
+    pkgs.cudaPackages.cudatoolkit        # libcudart.so, libcublas.so, etc.
+    pkgs.cudaPackages.cudatoolkit.lib
+  ]}:/run/opengl-driver/lib";  # libcuda.so from the NVIDIA driver
 }
