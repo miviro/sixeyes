@@ -1,6 +1,6 @@
 { pkgs ? import <nixpkgs> { config.allowUnfree = true; } }:
 pkgs.mkShell {
-  packages = [ pkgs.uv pkgs.cudaPackages.cudatoolkit pkgs.arduino-cli ];
+  packages = [ pkgs.uv pkgs.cudaPackages.cudatoolkit pkgs.arduino-cli pkgs.python313Packages.lap ];
 
   LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath [
     pkgs.stdenv.cc.cc.lib  # libstdc++.so.6
