@@ -4,8 +4,9 @@ import glob
 import time
 import cv2
 from ultralytics import YOLO
-from lstm import FRAME_W, FRAME_H, HFOV_DEG, VFOV_DEG, update_track, track_history
-from drawing import draw_track, draw_hud, draw_sweep_hud
+from predictors import FRAME_W, FRAME_H, HFOV_DEG, VFOV_DEG
+from pipeline import TrackingPipeline
+from drawing import draw_track, draw_ghost, draw_hud, draw_sweep_hud
 from aiming import init_serial, update_estimated_angles, aim, is_servo_moving, sweep_tick, reset_sweep
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
@@ -88,14 +89,13 @@ else:
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
         cap.set(cv2.CAP_PROP_FPS, 30)
 
-# target ms per frame for real-time pacing (camera is naturally paced)
 if input_type == "camera":
     frame_ms = 1
 elif input_type == "video":
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     frame_ms = int(1000 / fps)
-else:  # folder
-    frame_ms = 33  # 30 fps
+else:
+    frame_ms = 33
 
 def _frames():
     if input_type == "folder":
@@ -111,11 +111,10 @@ def _frames():
             yield frame
 
 # ---------------------------------------------------------------------------
-# Main loop
+# Main loop state
 # ---------------------------------------------------------------------------
 
 prev_t           = time.monotonic()
-lstm_enabled     = True
 SWEEP_PATIENCE   = 30
 _no_target_steps = 0
 ignored_tids     = set()
@@ -124,6 +123,15 @@ writer           = None
 last_frame       = None
 quit_requested   = False
 
+pipeline      = TrackingPipeline()
+pred_steps    = 5
+active_ghosts = {4}
+
+
+# ---------------------------------------------------------------------------
+# Main loop
+# ---------------------------------------------------------------------------
+
 for frame in _frames():
     now    = time.monotonic()
     dt     = now - prev_t
@@ -131,25 +139,43 @@ for frame in _frames():
 
     servo_yaw, servo_pitch = update_estimated_angles(dt) if tracking else (0.0, 0.0)
 
+    # b. YOLO pass
     results = yolo.track(frame, persist=True, verbose=False, classes=track_classes)
 
     has_detections = results[0].boxes.id is not None
     active_box     = None
 
+    # c+d. predictor pass + differences
+    all_preds: dict[int, dict] = {}
     if has_detections:
-        boxes  = results[0].boxes.xywh.cpu().numpy()
-        tids   = results[0].boxes.id.cpu().numpy().astype(int)
-        moving = is_servo_moving() if tracking else False
-        preds  = {}
+        boxes = results[0].boxes.xywh.cpu().numpy()
+        tids  = results[0].boxes.id.cpu().numpy().astype(int)
+
         for (cx, cy, w, h), tid in zip(boxes, tids):
-            ignored    = tid in ignored_tids
-            preds[tid] = update_track(tid, cx, cy, w, h, servo_yaw, servo_pitch,
-                                      moving or not lstm_enabled or ignored)
-            draw_track(frame, tid, cx, cy, w, h, track_history[tid],
-                       preds[tid] if lstm_enabled and not ignored else None,
-                       servo_yaw, servo_pitch)
-            if active_box is None and not ignored:
-                active_box = (cx, cy, w, h, tid)
+            ignored = tid in ignored_tids
+
+            if not ignored:
+                all_preds[tid] = pipeline.step(
+                    tid, cx, cy, w, h,
+                    servo_yaw, servo_pitch,
+                    pred_steps=pred_steps,
+                )
+
+            # e. drawing
+            draw_track(frame, tid, cx, cy, w, h,
+                       pipeline.history(tid) if not ignored else [],
+                       servo_yaw, servo_pitch,
+                       cal_remaining=pipeline.calibrating_remaining(tid) if not ignored else 0)
+
+            if not ignored:
+                for algo_id in active_ghosts:
+                    g = all_preds[tid].get(algo_id)
+                    if g is not None:
+                        draw_ghost(frame, cx, cy, g, algo_id, pred_steps,
+                                   servo_yaw, servo_pitch)
+
+                if active_box is None:
+                    active_box = (cx, cy, w, h, tid)
 
     has_target = active_box is not None
     if has_target:
@@ -158,11 +184,13 @@ for frame in _frames():
         _no_target_steps  = 0
         if tracking:
             reset_sweep()
-            if lstm_enabled and preds[tid] is not None:
-                aim(preds[tid][0], preds[tid][1])
+            lstm_on   = (3 in active_ghosts)
+            lstm_pred = all_preds.get(tid, {}).get(3)
+            if lstm_on and lstm_pred is not None:
+                aim(lstm_pred[0], lstm_pred[1])
             else:
                 det_yaw   = servo_yaw   + (0.5 - cx / FRAME_W) * HFOV_DEG
-                det_pitch = servo_pitch + (cy / FRAME_H - 0.5)  * VFOV_DEG
+                det_pitch = servo_pitch + (cy / FRAME_H - 0.5) * VFOV_DEG
                 aim(det_yaw, det_pitch)
     else:
         current_tid       = None
@@ -171,8 +199,9 @@ for frame in _frames():
             sweep_tick()
 
     sweeping = tracking and not has_target and _no_target_steps >= SWEEP_PATIENCE
-    draw_hud(frame, sweeping=sweeping, lstm_on=lstm_enabled,
-             patience=max(0, SWEEP_PATIENCE - _no_target_steps) if not has_target else 0)
+    draw_hud(frame, sweeping=sweeping,
+             patience=max(0, SWEEP_PATIENCE - _no_target_steps) if not has_target else 0,
+             pred_steps=pred_steps, active_ghosts=active_ghosts)
 
     if input_type == "folder":
         if writer is None:
@@ -183,15 +212,18 @@ for frame in _frames():
     last_frame = frame
     cv2.imshow("sixeyes", frame)
     elapsed_ms = int((time.monotonic() - now) * 1000)
-    key = cv2.waitKey(max(1, frame_ms - elapsed_ms)) & 0xFF
-    if key == ord("q"):
-        quit_requested = True
-        break
-    elif key == ord("l"):
-        lstm_enabled = not lstm_enabled
+    key = cv2.waitKey(max(1, frame_ms - elapsed_ms)) & 0xFFFF
+
+    if   key == ord("q"):  quit_requested = True; break
+    elif key == ord("l"):  active_ghosts ^= {3}
     elif key == ord("n") and current_tid is not None:
-        ignored_tids.add(current_tid)
-        current_tid = None
+        ignored_tids.add(current_tid); current_tid = None
+    elif key == ord("1"):  active_ghosts ^= {1}
+    elif key == ord("2"):  active_ghosts ^= {2}
+    elif key == ord("3"):  active_ghosts ^= {3}
+    elif key == ord("4"):  active_ghosts ^= {4}
+    elif key == ord("k"):  pred_steps = min(90, pred_steps + 1)
+    elif key == ord("j"):  pred_steps = max(1,  pred_steps - 1)
 
 if not quit_requested and last_frame is not None:
     while cv2.waitKey(100) & 0xFF != ord("q"):

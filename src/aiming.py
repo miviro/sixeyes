@@ -1,7 +1,7 @@
 import math
 import time
 import serial
-from lstm import HFOV_DEG, VFOV_DEG  # noqa: F401 — re-exported for drawing.py
+from predictors import HFOV_DEG, VFOV_DEG  # noqa: F401 — re-exported for drawing.py
 
 # Servo limits and centres (must match esp32.ino)
 YAW_CENTER   = 90.0
