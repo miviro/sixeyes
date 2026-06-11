@@ -1,11 +1,9 @@
 import os
 import glob
 import cv2
+from config import CAMERA_W, CAMERA_H, CAMERA_FPS
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
-
-CAMERA_W = 1920
-CAMERA_H = 1080
 
 
 def open_input(raw_input: str):
@@ -22,7 +20,7 @@ def _camera(index: int):
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAMERA_W)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_H)
-    cap.set(cv2.CAP_PROP_FPS, 30)
+    cap.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
     try:
         while cap.isOpened():
             ok, frame = cap.read()
