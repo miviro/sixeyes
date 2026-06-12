@@ -2,6 +2,7 @@ PORT   ?= /dev/ttyUSB0
 FQBN   ?= esp32:esp32:esp32
 SKETCH := esp32
 SCRIPT := src/sixeyes.py
+MODEL  ?= yolo11m.pt
 
 .PHONY: run flash start sync
 
@@ -12,4 +13,4 @@ flash:
 	arduino-cli upload  --fqbn $(FQBN) --port $(PORT) $(SKETCH)
 
 start:
-	uv run python $(SCRIPT)
+	uv run python $(SCRIPT) $(MODEL) camera:0
