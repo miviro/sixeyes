@@ -10,8 +10,9 @@ from config import MOG_DELTA_FRAMES, MOG_VAR_THRESHOLD, MOG_DETECT_SHADOWS, MOG_
 if len(sys.argv) < 3:
     sys.exit("usage: sixeyes.py <model.pt> <camera:N | video | folder>")
 
-model = YOLO(sys.argv[1])
-model_label = sys.argv[1].rsplit("/", 1)[-1].rsplit(".", 1)[0]
+model_path = sys.argv[1]
+model_label = model_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+model = YOLO(model_path, task="detect")
 
 mog = cv2.createBackgroundSubtractorMOG2(
     history=MOG_DELTA_FRAMES,
@@ -29,7 +30,7 @@ for frame in open_input(sys.argv[2]):
     fg_bgr  = cv2.cvtColor(fg_mask, cv2.COLOR_GRAY2BGR)
     t1 = time.perf_counter()
 
-    results  = model.track(frame, verbose=False, persist=True, imgsz=(1920, 1088), half=True)
+    results = model.track(frame, verbose=False, persist=True, imgsz=(1920, 1088))
     yolo_bgr = results[0].plot()
     t2 = time.perf_counter()
 
