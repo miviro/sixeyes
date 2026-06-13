@@ -5,7 +5,7 @@ import numpy as np
 from ultralytics import YOLO
 from input_source import open_input
 from display import make_grid
-from config import MOG_DELTA_FRAMES, MOG_VAR_THRESHOLD, MOG_DETECT_SHADOWS
+from config import MOG_DELTA_FRAMES, MOG_VAR_THRESHOLD, MOG_DETECT_SHADOWS, MOG_SCALE_W, MOG_SCALE_H
 
 if len(sys.argv) < 3:
     sys.exit("usage: sixeyes.py <model.pt> <camera:N | video | folder>")
@@ -23,7 +23,9 @@ FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 for frame in open_input(sys.argv[2]):
     t0 = time.perf_counter()
-    fg_mask = mog.apply(frame)
+    small   = cv2.resize(frame, (MOG_SCALE_W, MOG_SCALE_H), interpolation=cv2.INTER_LINEAR)
+    fg_mask = mog.apply(small)
+    fg_mask = cv2.resize(fg_mask, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_LINEAR)
     fg_bgr  = cv2.cvtColor(fg_mask, cv2.COLOR_GRAY2BGR)
     t1 = time.perf_counter()
 

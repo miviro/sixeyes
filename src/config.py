@@ -18,4 +18,6 @@ CAMERA_FPS  = 30
 MOG_DELTA_FRAMES   = 200   # number of past frames used to build the background model
 MOG_VAR_THRESHOLD  = 16    # squared Mahalanobis distance threshold for foreground classification
 MOG_DETECT_SHADOWS = True
+MOG_SCALE_W        = 480   # downsample width before MOG (upscaled back afterwards)
+MOG_SCALE_H        = 270   # downsample height before MOG
 
