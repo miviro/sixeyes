@@ -21,6 +21,13 @@ mog = cv2.createBackgroundSubtractorMOG2(
 )
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
+EMA_ALPHA = 0.05  # ~20-frame smoothing window
+
+ema_mog   = None
+ema_yolo  = None
+ema_grid  = None
+ema_total = None
+frame_count = 0
 
 for frame in open_input(sys.argv[2]):
     t0 = time.perf_counter()
@@ -46,11 +53,20 @@ for frame in open_input(sys.argv[2]):
     yolo_ms  = (t2 - t1) * 1000
     grid_ms  = (t3 - t2) * 1000
     total_ms = (t3 - t0) * 1000
+    frame_count += 1
+
+    if ema_mog is None:
+        ema_mog, ema_yolo, ema_grid, ema_total = mog_ms, yolo_ms, grid_ms, total_ms
+    else:
+        ema_mog   += EMA_ALPHA * (mog_ms   - ema_mog)
+        ema_yolo  += EMA_ALPHA * (yolo_ms  - ema_yolo)
+        ema_grid  += EMA_ALPHA * (grid_ms  - ema_grid)
+        ema_total += EMA_ALPHA * (total_ms - ema_total)
 
     bar_h = 28
     bar = np.zeros((bar_h, grid.shape[1], 3), dtype=np.uint8)
-    label = (f"MoG {mog_ms:.1f}ms  |  YOLO {yolo_ms:.1f}ms  |"
-             f"  Grid {grid_ms:.1f}ms  |  Total {total_ms:.1f}ms  ({1000/total_ms:.1f} fps)")
+    label = (f"MoG {ema_mog:.1f}ms  |  YOLO {ema_yolo:.1f}ms  |  Grid {ema_grid:.1f}ms  |"
+             f"  Total {ema_total:.1f}ms  ({1000/ema_total:.1f} fps avg)  |  frame {frame_count}")
     cv2.putText(bar, label, (8, bar_h - 8), FONT, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
 
     print(f"\n{label}", end="", flush=True)
