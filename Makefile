@@ -13,4 +13,4 @@ flash:
 	arduino-cli upload  --fqbn $(FQBN) --port $(PORT) $(SKETCH)
 
 start:
-	uv run python $(SCRIPT) $(MODEL) camera:0
+	uv run python $(SCRIPT) $(MODEL) eighteyes

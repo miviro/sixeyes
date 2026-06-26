@@ -10,7 +10,7 @@ SixEyes is a real-time computer vision system that tracks objects and drives two
 src/
   sixeyes.py        # Entry point — frame loop, background subtraction
   config.py         # All tunable constants (display, camera, MOG2)
-  input_source.py   # Input abstraction (camera / video file / image folder)
+  input_source.py   # Input abstraction (eighteyes / camera / video file / image folder)
   display.py        # Grid renderer for side-by-side panel display
 esp32/
   esp32.ino         # Servo control firmware (pitch GPIO2, yaw GPIO4)
@@ -29,12 +29,13 @@ shell.nix           # Nix dev environment (includes CUDA, arduino-cli, uv)
 # Flash firmware (requires connected ESP32)
 make flash PORT=/dev/ttyUSB0
 
-# Start Python pipeline (webcam index 0, YOLO model as first arg)
+# Start Python pipeline — auto-discovers the first eighteyes device on the LAN
 make start
 # or directly:
-uv run python src/sixeyes.py yolo11m.pt camera:0
+uv run python src/sixeyes.py yolo11m.pt eighteyes
 
 # Other input sources
+uv run python src/sixeyes.py yolo11m.pt camera:0
 uv run python src/sixeyes.py yolo11m.pt video path/to/file.mp4
 uv run python src/sixeyes.py yolo11m.pt folder path/to/frames/
 
@@ -78,6 +79,21 @@ Add a generator function in `input_source.py` and extend the `open_input()` rout
 
 ### Evaluating a run
 Each `runs/<timestamp>/` directory contains `annotated.mp4` and `errors.csv` (frame ID, tracking ID, algorithm, angular error in degrees). Use these to compare algorithms.
+
+## Input Source: `eighteyes`
+
+Passing `eighteyes` as the input argument starts `EighteeyesMonitor` — a background daemon that discovers devices via **DNS only** (no TCP connection to port 81, which would displace the live stream since devices only support one viewer at a time).
+
+### Discovery flow
+
+1. `EighteeyesMonitor` sweeps `eighteyes1.local` through `eighteyes16.local` in parallel every 5 s using `concurrent.futures.ThreadPoolExecutor` + `socket.getaddrinfo`.
+2. `_sync_monitor()` is called every frame. When a new hostname resolves it calls `_add_source()` once — the source is **never removed** afterwards.
+3. `_add_source()` creates a `_FrameBuffer` (background reader thread) and a fresh MOG2 subtractor, then spawns a thread to load the YOLO model asynchronously. Raw + MOG panels appear as soon as the first frame arrives; the YOLO panel follows once the model is ready.
+4. `_stream(url)` opens the MJPEG stream via `cv2.VideoCapture` and yields frames. On disconnect it sleeps 1 s and reconnects automatically — the panel stays showing the last received frame in the meantime.
+
+Tunable constant in `config.py`: `EIGHTEYES_MAX_INDEX` (default 16).
+
+No third-party dependencies are needed — `socket` and `concurrent.futures` are stdlib.
 
 ## Dependencies
 

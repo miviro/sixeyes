@@ -14,10 +14,13 @@ CAMERA_W    = 1920
 CAMERA_H    = 1080
 CAMERA_FPS  = 30
 
+# --- Eighteyes ---
+EIGHTEYES_MAX_INDEX = 16  # attempt connections eighteyes1..N.local
+
 # --- Mixture-of-Gaussians background subtraction ---
 MOG_DELTA_FRAMES   = 200   # number of past frames used to build the background model
 MOG_VAR_THRESHOLD  = 16    # squared Mahalanobis distance threshold for foreground classification
 MOG_DETECT_SHADOWS = True
-MOG_SCALE_W        = 480   # downsample width before MOG (upscaled back afterwards)
-MOG_SCALE_H        = 270   # downsample height before MOG
+MOG_SCALE_W        = 192   # downsample width before MOG (upscaled back afterwards)
+MOG_SCALE_H        = 108 # downsample height before MOG
 
