@@ -10,7 +10,8 @@ from display import make_grid
 from config import MOG_DELTA_FRAMES, MOG_VAR_THRESHOLD, MOG_DETECT_SHADOWS, MOG_SCALE_W, MOG_SCALE_H
 
 if len(sys.argv) < 3:
-    sys.exit("usage: sixeyes.py <model.pt> <source1> [source2 ...]")
+    sys.exit("usage: sixeyes.py <model.pt> <source1> [source2 ...]\n"
+             "  Pass '3d' as a source to enable 3-D ground-truth reconstruction.")
 
 model_path = sys.argv[1]
 model_label = model_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
@@ -60,13 +61,27 @@ def _add_source(key: str, spec: str, label: str):
         if key in _registry:
             return
         _registry[key] = (_FrameBuffer(spec), _make_mog(), None, label)
+    if ground_truth is not None:
+        ground_truth.add_camera(key, key)
     threading.Thread(target=_load_model_bg, args=(key,), daemon=True).start()
     print(f"[+] {label}")
+
+
+# --- 3-D ground-truth mode ---
+# Activated by passing '3d' anywhere in the source list.
+# All other sources (camera:N, eighteyes, URLs) participate in reconstruction.
+ground_truth = None
+if "3d" in sys.argv[2:]:
+    from ground_truth import GroundTruthEngine
+    ground_truth = GroundTruthEngine()
+    print("3D ground-truth mode enabled  (W/S/A/D/=/-: orbit controls)")
 
 
 # --- Parse args ---
 monitor: EighteeyesMonitor | None = None
 for _spec in sys.argv[2:]:
+    if _spec == "3d":
+        continue  # handled above
     if _spec == "eighteyes":
         if monitor is None:
             monitor = EighteeyesMonitor()
@@ -120,10 +135,24 @@ while True:
         panels.append((f"MoG{suffix}", fg_bgr))
         active_labels.append(label)
 
+        det_center = None
         if model is not None:
             results = model.track(frame, verbose=False, persist=True, imgsz=128, conf=0.1)
             yolo_bgr = results[0].plot()
             panels.append((f"{model_label}{suffix}", yolo_bgr))
+
+            if ground_truth is not None:
+                boxes = results[0].boxes
+                if boxes is not None and len(boxes) > 0:
+                    best = int(boxes.conf.cpu().numpy().argmax())
+                    x1, y1, x2, y2 = boxes.xyxy[best].cpu().numpy()
+                    det_center = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+
+        if ground_truth is not None:
+            ground_truth.update(key, frame, fg_mask, det_center)
+
+    if ground_truth is not None:
+        panels.append(("3D Ground Truth", ground_truth.get_3d_frame()))
 
     if not panels:
         time.sleep(0.01)
@@ -147,7 +176,11 @@ while True:
 
     print(f"\r{status}", end="", flush=True)
     cv2.imshow("sixeyes", np.vstack([grid, bar]))
-    if cv2.waitKey(1) & 0xFF == ord("q"):
+
+    key_pressed = cv2.waitKey(1) & 0xFF
+    if key_pressed == ord("q"):
         break
+    if ground_truth is not None:
+        ground_truth.handle_key(key_pressed)
 
 cv2.destroyAllWindows()
