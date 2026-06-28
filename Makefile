@@ -2,8 +2,8 @@ PORT      ?= /dev/ttyUSB0
 FQBN      ?= esp32:esp32:esp32
 CAM_FQBN  ?= esp32:esp32:esp32cam
 CAM_PORT  ?= /dev/ttyUSB0
-SKETCH    := esp32
-CAM_SKETCH := esp32/camera_upload
+SKETCH    := esp32/pantilt
+CAM_SKETCH := esp32/eighteyes
 SCRIPT    := src/sixeyes.py
 MODEL     ?= yolo11m.pt
 

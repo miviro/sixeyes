@@ -1,8 +1,8 @@
 #pragma once
 
 // WiFi station credentials — must match your access point
-#define WIFI_SSID     ""
-#define WIFI_PASSWORD ""
+#define WIFI_SSID     "Orange-AA0A"
+#define WIFI_PASSWORD "miguelnacio080403"
 
 // Camera capture settings
 // Resolution options (OV2640 max is UXGA 1600×1200, but lower = higher FPS):
