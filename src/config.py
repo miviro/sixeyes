@@ -13,6 +13,8 @@ FONT_THICK  = 1
 CAMERA_W    = 1920
 CAMERA_H    = 1080
 CAMERA_FPS  = 30
+HFOV_DEG    = 69.3   # Creative Live! Cam Sync 1080p horizontal FOV (degrees)
+VFOV_DEG    = 42.4   # Creative Live! Cam Sync 1080p vertical FOV (degrees)
 
 # --- Eighteyes ---
 EIGHTEYES_MAX_INDEX = 16  # attempt connections eighteyes1..N.local

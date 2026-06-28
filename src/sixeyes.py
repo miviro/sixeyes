@@ -8,8 +8,10 @@ import numpy as np
 from ultralytics import YOLO
 from input_source import open_input, EighteeyesMonitor
 from display import make_grid
+import aiming
 from config import (MOG_DELTA_FRAMES, MOG_VAR_THRESHOLD, MOG_DETECT_SHADOWS,
-                    MOG_SCALE_W, MOG_SCALE_H, FOLLOW_ZONE, FOLLOW_PORT)
+                    MOG_SCALE_W, MOG_SCALE_H, FOLLOW_ZONE, FOLLOW_PORT,
+                    HFOV_DEG, VFOV_DEG)
 
 # --- Parse --follow / --port before the positional argv checks below ---
 _ap = argparse.ArgumentParser(add_help=False)
@@ -21,11 +23,9 @@ _follow_ns, _remaining = _ap.parse_known_args()
 sys.argv = [sys.argv[0]] + _remaining   # strip flags so existing positional logic still works
 
 follow = _follow_ns.follow
-_serial = None
 if follow:
-    import serial as _pyserial
     _sport = _follow_ns.port or FOLLOW_PORT
-    _serial = _pyserial.Serial(_sport, 115200, timeout=0)
+    aiming.init_serial(_sport)
     print(f"[follow] Servo serial open on {_sport}")
 
 if len(sys.argv) < 3:
@@ -126,9 +126,18 @@ FONT = cv2.FONT_HERSHEY_SIMPLEX
 EMA_ALPHA = 0.05
 ema_total = None
 frame_count = 0
+_prev_frame_t = time.perf_counter()
+SWEEP_PATIENCE = 30   # frames without a target before sweep starts
+_no_target_frames = 0
 
 while True:
     t0 = time.perf_counter()
+    _dt = t0 - _prev_frame_t
+    _prev_frame_t = t0
+    _servo_yaw, _servo_pitch = (
+        aiming.update_estimated_angles(_dt) if follow
+        else (aiming.YAW_CENTER, aiming.PITCH_CENTER)
+    )
 
     _sync_monitor()
 
@@ -137,6 +146,7 @@ while True:
 
     panels = []
     active_labels = []
+    follow_status = ""
     n_connected = sum(1 for _, (b, *_) in entries if b.get() is not None)
 
     for key, (buf, mog, model, label) in entries:
@@ -177,20 +187,31 @@ while True:
                 x1, y1, x2, y2 = boxes.xyxy[best].cpu().numpy()
                 det_center = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
-                if follow and _serial is not None:
+                if follow:
                     tx, ty = det_center
-                    if not (dz_x1 <= tx <= dz_x2 and dz_y1 <= ty <= dz_y2):
-                        # Normalised offset from frame centre in [-1, 1]
-                        dx = (tx - fw / 2.0) / (fw / 2.0)
-                        dy = (ty - fh / 2.0) / (fh / 2.0)
-                        # Map to servo ranges: yaw 10–170°, pitch 0–140°
-                        # dy inverted: positive (target below centre) → lower pitch
-                        yaw   = int(max(10,  min(170, 90.0 + dx * 80.0)))
-                        pitch = int(max(0,   min(140, 70.0 - dy * 70.0)))
-                        _serial.write(bytes([0xFF, pitch, yaw]))
+                    inside = dz_x1 <= tx <= dz_x2 and dz_y1 <= ty <= dz_y2
+                    if inside:
+                        _no_target_frames = 0
+                        aiming.reset_sweep()
+                        follow_status = f"  |  follow: in zone ({tx:.0f},{ty:.0f})"
+                    else:
+                        _no_target_frames = 0
+                        aiming.reset_sweep()
+                        world_yaw   = _servo_yaw   + (0.5 - tx / fw) * HFOV_DEG
+                        world_pitch = _servo_pitch + (ty / fh - 0.5) * VFOV_DEG
+                        aiming.aim(world_yaw, world_pitch)
+                        follow_status = f"  |  follow: → {world_yaw:.1f}° {world_pitch:.1f}°"
+            elif follow:
+                follow_status = "  |  follow: no det"
 
         if ground_truth is not None:
             ground_truth.update(key, frame, fg_mask, det_center)
+
+    if follow and follow_status == "":
+        _no_target_frames += 1
+        if _no_target_frames >= SWEEP_PATIENCE:
+            aiming.sweep_tick()
+            follow_status = f"  |  follow: sweeping ({_no_target_frames}f)"
 
     if ground_truth is not None:
         panels.append(("3D Ground Truth", ground_truth.get_3d_frame()))
@@ -212,7 +233,7 @@ while True:
     bar = np.zeros((bar_h, grid.shape[1], 3), dtype=np.uint8)
     src_str = "  +  ".join(active_labels) if active_labels else "no sources"
     status = (f"Total {ema_total:.1f}ms  ({1000 / ema_total:.1f} fps avg)  |  "
-              f"frame {frame_count}  |  {src_str}")
+              f"frame {frame_count}  |  {src_str}{follow_status}")
     cv2.putText(bar, status, (8, bar_h - 8), FONT, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
 
     print(f"\r{status}", end="", flush=True)
@@ -225,5 +246,3 @@ while True:
         ground_truth.handle_key(key_pressed)
 
 cv2.destroyAllWindows()
-if _serial is not None:
-    _serial.close()
