@@ -17,6 +17,10 @@ CAMERA_FPS  = 30
 # --- Eighteyes ---
 EIGHTEYES_MAX_INDEX = 16  # attempt connections eighteyes1..N.local
 
+# --- Follow / servo tracking ---
+FOLLOW_ZONE = 0.5          # dead-zone size as a fraction of each frame axis (centred)
+FOLLOW_PORT = "/dev/ttyUSB0"
+
 # --- Mixture-of-Gaussians background subtraction ---
 MOG_DELTA_FRAMES   = 200   # number of past frames used to build the background model
 MOG_VAR_THRESHOLD  = 16    # squared Mahalanobis distance threshold for foreground classification

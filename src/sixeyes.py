@@ -1,5 +1,6 @@
 import os
 import sys
+import argparse
 import time
 import threading
 import cv2
@@ -7,10 +8,28 @@ import numpy as np
 from ultralytics import YOLO
 from input_source import open_input, EighteeyesMonitor
 from display import make_grid
-from config import MOG_DELTA_FRAMES, MOG_VAR_THRESHOLD, MOG_DETECT_SHADOWS, MOG_SCALE_W, MOG_SCALE_H
+from config import (MOG_DELTA_FRAMES, MOG_VAR_THRESHOLD, MOG_DETECT_SHADOWS,
+                    MOG_SCALE_W, MOG_SCALE_H, FOLLOW_ZONE, FOLLOW_PORT)
+
+# --- Parse --follow / --port before the positional argv checks below ---
+_ap = argparse.ArgumentParser(add_help=False)
+_ap.add_argument("--follow", action="store_true",
+                 help="track detected targets and drive servos via serial")
+_ap.add_argument("--port", default=None,
+                 help=f"serial port for --follow (default: {FOLLOW_PORT})")
+_follow_ns, _remaining = _ap.parse_known_args()
+sys.argv = [sys.argv[0]] + _remaining   # strip flags so existing positional logic still works
+
+follow = _follow_ns.follow
+_serial = None
+if follow:
+    import serial as _pyserial
+    _sport = _follow_ns.port or FOLLOW_PORT
+    _serial = _pyserial.Serial(_sport, 115200, timeout=0)
+    print(f"[follow] Servo serial open on {_sport}")
 
 if len(sys.argv) < 3:
-    sys.exit("usage: sixeyes.py <model.pt> <source1> [source2 ...]\n"
+    sys.exit("usage: sixeyes.py [--follow [--port DEV]] <model.pt> <source1> [source2 ...]\n"
              "  Pass '3d' as a source to enable 3-D ground-truth reconstruction.")
 
 model_path = sys.argv[1]
@@ -131,6 +150,16 @@ while True:
         fg_bgr = cv2.cvtColor(fg_mask, cv2.COLOR_GRAY2BGR)
 
         suffix = f" [{label}]" if n_connected > 1 else ""
+
+        # Dead zone: centre FOLLOW_ZONE of each axis (drawn in frame coords;
+        # make_grid will scale proportionally to the display cell).
+        fh, fw = frame.shape[:2]
+        margin_x = (1.0 - FOLLOW_ZONE) / 2.0
+        margin_y = (1.0 - FOLLOW_ZONE) / 2.0
+        dz_x1, dz_y1 = int(fw * margin_x), int(fh * margin_y)
+        dz_x2, dz_y2 = int(fw * (1.0 - margin_x)), int(fh * (1.0 - margin_y))
+        DZ_COLOR = (0, 220, 0)
+
         panels.append((f"Raw{suffix}", frame))
         panels.append((f"MoG{suffix}", fg_bgr))
         active_labels.append(label)
@@ -139,14 +168,26 @@ while True:
         if model is not None:
             results = model.track(frame, verbose=False, persist=True, imgsz=128, conf=0.1)
             yolo_bgr = results[0].plot()
+            cv2.rectangle(yolo_bgr, (dz_x1, dz_y1), (dz_x2, dz_y2), DZ_COLOR, 2)
             panels.append((f"{model_label}{suffix}", yolo_bgr))
 
-            if ground_truth is not None:
-                boxes = results[0].boxes
-                if boxes is not None and len(boxes) > 0:
-                    best = int(boxes.conf.cpu().numpy().argmax())
-                    x1, y1, x2, y2 = boxes.xyxy[best].cpu().numpy()
-                    det_center = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+            boxes = results[0].boxes
+            if boxes is not None and len(boxes) > 0:
+                best = int(boxes.conf.cpu().numpy().argmax())
+                x1, y1, x2, y2 = boxes.xyxy[best].cpu().numpy()
+                det_center = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+
+                if follow and _serial is not None:
+                    tx, ty = det_center
+                    if not (dz_x1 <= tx <= dz_x2 and dz_y1 <= ty <= dz_y2):
+                        # Normalised offset from frame centre in [-1, 1]
+                        dx = (tx - fw / 2.0) / (fw / 2.0)
+                        dy = (ty - fh / 2.0) / (fh / 2.0)
+                        # Map to servo ranges: yaw 10–170°, pitch 0–140°
+                        # dy inverted: positive (target below centre) → lower pitch
+                        yaw   = int(max(10,  min(170, 90.0 + dx * 80.0)))
+                        pitch = int(max(0,   min(140, 70.0 - dy * 70.0)))
+                        _serial.write(bytes([0xFF, pitch, yaw]))
 
         if ground_truth is not None:
             ground_truth.update(key, frame, fg_mask, det_center)
@@ -184,3 +225,5 @@ while True:
         ground_truth.handle_key(key_pressed)
 
 cv2.destroyAllWindows()
+if _serial is not None:
+    _serial.close()
