@@ -29,8 +29,7 @@ if follow:
     print(f"[follow] Servo serial open on {_sport}")
 
 if len(sys.argv) < 3:
-    sys.exit("usage: sixeyes.py [--follow [--port DEV]] <model.pt> <source1> [source2 ...]\n"
-             "  Pass '3d' as a source to enable 3-D ground-truth reconstruction.")
+    sys.exit("usage: sixeyes.py [--follow [--port DEV]] <model.pt> <source1> [source2 ...]")
 
 model_path = sys.argv[1]
 model_label = model_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
@@ -80,27 +79,13 @@ def _add_source(key: str, spec: str, label: str):
         if key in _registry:
             return
         _registry[key] = (_FrameBuffer(spec), _make_mog(), None, label)
-    if ground_truth is not None:
-        ground_truth.add_camera(key, key)
     threading.Thread(target=_load_model_bg, args=(key,), daemon=True).start()
     print(f"[+] {label}")
-
-
-# --- 3-D ground-truth mode ---
-# Activated by passing '3d' anywhere in the source list.
-# All other sources (camera:N, eighteyes, URLs) participate in reconstruction.
-ground_truth = None
-if "3d" in sys.argv[2:]:
-    from ground_truth import GroundTruthEngine
-    ground_truth = GroundTruthEngine()
-    print("3D ground-truth mode enabled  (W/S/A/D/=/-: orbit controls)")
 
 
 # --- Parse args ---
 monitor: EighteeyesMonitor | None = None
 for _spec in sys.argv[2:]:
-    if _spec == "3d":
-        continue  # handled above
     if _spec == "eighteyes":
         if monitor is None:
             monitor = EighteeyesMonitor()
@@ -174,9 +159,8 @@ while True:
         panels.append((f"MoG{suffix}", fg_bgr))
         active_labels.append(label)
 
-        det_center = None
         if model is not None:
-            results = model.track(frame, verbose=False, persist=True, imgsz=128, conf=0.1)
+            results = model.track(frame, verbose=False, persist=True, imgsz=640, conf=0.6)
             yolo_bgr = results[0].plot()
             cv2.rectangle(yolo_bgr, (dz_x1, dz_y1), (dz_x2, dz_y2), DZ_COLOR, 2)
             panels.append((f"{model_label}{suffix}", yolo_bgr))
@@ -185,10 +169,10 @@ while True:
             if boxes is not None and len(boxes) > 0:
                 best = int(boxes.conf.cpu().numpy().argmax())
                 x1, y1, x2, y2 = boxes.xyxy[best].cpu().numpy()
-                det_center = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+                tx = (x1 + x2) / 2.0
+                ty = (y1 + y2) / 2.0
 
                 if follow:
-                    tx, ty = det_center
                     inside = dz_x1 <= tx <= dz_x2 and dz_y1 <= ty <= dz_y2
                     if inside:
                         _no_target_frames = 0
@@ -204,17 +188,11 @@ while True:
             elif follow:
                 follow_status = "  |  follow: no det"
 
-        if ground_truth is not None:
-            ground_truth.update(key, frame, fg_mask, det_center)
-
     if follow and follow_status == "":
         _no_target_frames += 1
         if _no_target_frames >= SWEEP_PATIENCE:
             aiming.sweep_tick()
             follow_status = f"  |  follow: sweeping ({_no_target_frames}f)"
-
-    if ground_truth is not None:
-        panels.append(("3D Ground Truth", ground_truth.get_3d_frame()))
 
     if not panels:
         time.sleep(0.01)
@@ -242,7 +220,4 @@ while True:
     key_pressed = cv2.waitKey(1) & 0xFF
     if key_pressed == ord("q"):
         break
-    if ground_truth is not None:
-        ground_truth.handle_key(key_pressed)
-
 cv2.destroyAllWindows()

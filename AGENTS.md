@@ -22,7 +22,6 @@ src/
   config.py         # All tuneable constants
   display.py        # make_grid() — renders panels into a tiled OpenCV window
   input_source.py   # Input generators: camera, video, folder, MJPEG URL, eighteyes
-  ground_truth.py   # Optional 3-D reconstruction from ≥2 cameras (GroundTruthEngine)
 esp32/
   pantilt/
     pantilt.ino              # Servo firmware (yaw GPIO2, pitch GPIO4)
@@ -31,9 +30,6 @@ esp32/
     eighteyes.ino            # Camera firmware (WiFi + MJPEG server)
     wifi_config.h            # SSID / password / resolution / JPEG quality
     partitions.csv           # Custom 16 MB partition table
-yolo11m.pt          # YOLOv11-medium weights
-faces.pt            # Face-detection weights
-doguilmak.pt        # Custom-trained weights
 Makefile            # flash / flash-cam / start / all targets
 pyproject.toml      # Python deps (uv-managed)
 shell.nix           # Nix dev shell (arduino-cli, uv, CUDA)
@@ -67,9 +63,6 @@ uv run python src/sixeyes.py yolo11m.pt folder path/to/frames/
 
 # Multiple sources at once
 uv run python src/sixeyes.py yolo11m.pt camera:0 eighteyes
-
-# 3-D ground-truth mode (pass '3d' anywhere in the source list)
-uv run python src/sixeyes.py yolo11m.pt 3d camera:0 eighteyes
 ```
 
 Press `q` to quit.
@@ -83,7 +76,7 @@ Press `q` to quit.
 | `--follow` | off | Enable servo tracking via serial |
 | `--port DEV` | `/dev/ttyUSB0` | Serial port used by `--follow` |
 
-Positional arguments after the model path are input sources. `3d` is a reserved source token that enables 3-D reconstruction without opening a video source.
+Positional arguments after the model path are input sources.
 
 ---
 
@@ -95,7 +88,7 @@ The main loop runs once per display frame. For every registered source:
 2. MOG2 background subtraction — run on a downscaled copy (`MOG_SCALE_W × MOG_SCALE_H`) then upscaled back, yielding a foreground mask panel.
 3. YOLO tracking — `model.track(frame, persist=True, imgsz=128, conf=0.1)` on the full frame. The model is loaded asynchronously in a background thread when a source is first registered; the YOLO panel is absent until it is ready.
 4. Dead-zone check — a green rectangle covering the centre `FOLLOW_ZONE` fraction of the frame is drawn on the YOLO panel. When `--follow` is active and the highest-confidence detection is **outside** the rectangle, `aiming.aim()` is called.
-5. `aiming.sweep_tick()` — called after `SWEEP_PATIENCE` consecutive frames with no detection, sweeping the servos in a triangle/sine pattern.
+5. `aiming.sweep_tick()` — called after `SWEEP_PATIENCE` (30) consecutive frames with no detection, sweeping the servos in a triangle/sine pattern.
 6. `make_grid()` renders all panels into a tiled window. A status bar at the bottom shows EMA frame time, FPS, active sources, and follow state.
 
 ---
@@ -216,34 +209,6 @@ Resolution is a compile-time constant — changing it requires reflashing.
 
 ---
 
-## 3-D ground-truth mode (`src/ground_truth.py`)
-
-Activated by passing `3d` in the source list. `GroundTruthEngine` triangulates the tracked object across ≥2 cameras.
-
-**Pipeline:**
-1. Each camera collects `GT_BG_FRAMES` (20) quiet frames (foreground ratio < 8%).
-2. A background thread extracts ORB features and estimates relative camera poses via `findEssentialMat` + `recoverPose`. The first camera is the world origin. Scale is unit-norm (monocular ambiguity).
-3. With ≥2 known poses and simultaneous YOLO detections, `cv2.triangulatePoints` is applied for every camera pair and averaged.
-4. `get_3d_frame()` renders camera frustums, an object trail, a ground grid, and world axes into a 640×360 panel.
-
-**Orbit controls** (active when `3d` is passed):
-
-| Key | Action |
-|-----|--------|
-| `A` / `D` | Orbit yaw |
-| `W` / `S` | Orbit pitch |
-| `=` / `-` | Zoom in / out |
-
-**FOV assumptions** (in `config.py`):
-
-| Source | FOV | Type |
-|--------|-----|------|
-| `eighteyesN` / `:81/` URL | 66° | Horizontal (OV2640 SVGA) |
-| `camera:N` | 90° | Diagonal (Creative 1080p) |
-| Other | 70° | Horizontal (fallback) |
-
----
-
 ## Config reference (`src/config.py`)
 
 ### Display
@@ -274,18 +239,6 @@ Activated by passing `3d` in the source list. `GroundTruthEngine` triangulates t
 | `MOG_VAR_THRESHOLD` | 16 |
 | `MOG_DETECT_SHADOWS` | True |
 | `MOG_SCALE_W / H` | 192 / 108 |
-
-### 3-D ground truth
-| Constant | Value |
-|----------|-------|
-| `GT_FOV_ESP32CAM` | 66.0° |
-| `GT_FOV_CREATIVE_1080P` | 90.0° |
-| `GT_FOV_DEFAULT` | 70.0° |
-| `GT_BG_FRAMES` | 20 |
-| `GT_MIN_MATCHES` | 25 |
-| `GT_TRAIL_LEN` | 80 |
-| `GT_VIEW_W / H` | 640 / 360 |
-| `GT_VIEW_FOCAL` | 380.0 |
 
 ---
 
