@@ -58,8 +58,8 @@ uv run python src/sixeyes.py yolo11m.pt eighteyes --follow --port /dev/ttyUSB1
 
 # Other input sources
 uv run python src/sixeyes.py yolo11m.pt camera:0
-uv run python src/sixeyes.py yolo11m.pt video path/to/file.mp4
-uv run python src/sixeyes.py yolo11m.pt folder path/to/frames/
+uv run python src/sixeyes.py yolo11m.pt path/to/file.mp4
+uv run python src/sixeyes.py yolo11m.pt path/to/frames/
 
 # Multiple sources at once
 uv run python src/sixeyes.py yolo11m.pt camera:0 eighteyes

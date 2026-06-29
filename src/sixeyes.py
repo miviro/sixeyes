@@ -1,73 +1,42 @@
-import os
-import sys
 import argparse
-import time
 import threading
+import time
+from pathlib import Path
+
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from input_source import open_input, EighteeyesMonitor
-from display import make_grid
+
 import aiming
-from config import (MOG_DELTA_FRAMES, MOG_VAR_THRESHOLD, MOG_DETECT_SHADOWS,
-                    MOG_SCALE_W, MOG_SCALE_H, FOLLOW_ZONE, FOLLOW_PORT,
-                    HFOV_DEG, VFOV_DEG)
+from config import (FOLLOW_PORT, FOLLOW_ZONE, HFOV_DEG, VFOV_DEG,
+                    SWEEP_PATIENCE, EMA_ALPHA, DZ_COLOR)
+from display import make_grid
+from input_source import FrameBuffer, EighteeyesMonitor
+from mog import make_mog, apply_mog
 
-# --- Parse --follow / --port before the positional argv checks below ---
-_ap = argparse.ArgumentParser(add_help=False)
-_ap.add_argument("--follow", action="store_true",
-                 help="track detected targets and drive servos via serial")
-_ap.add_argument("--port", default=None,
-                 help=f"serial port for --follow (default: {FOLLOW_PORT})")
-_follow_ns, _remaining = _ap.parse_known_args()
-sys.argv = [sys.argv[0]] + _remaining   # strip flags so existing positional logic still works
+# ---- CLI ----
+parser = argparse.ArgumentParser(prog="sixeyes")
+parser.add_argument("model", help="YOLO model .pt file")
+parser.add_argument("sources", nargs="+",
+                    help="input sources: camera:N, http://..., path/to/file, path/to/dir, eighteyes")
+parser.add_argument("--follow", action="store_true", help="enable servo tracking via serial")
+parser.add_argument("--port", default=FOLLOW_PORT, help="serial port for --follow")
+args = parser.parse_args()
 
-follow = _follow_ns.follow
-if follow:
-    _sport = _follow_ns.port or FOLLOW_PORT
-    aiming.init_serial(_sport)
-    print(f"[follow] Servo serial open on {_sport}")
+model_label = Path(args.model).stem
 
-if len(sys.argv) < 3:
-    sys.exit("usage: sixeyes.py [--follow [--port DEV]] <model.pt> <source1> [source2 ...]")
+if args.follow:
+    aiming.init_serial(args.port)
+    print(f"[follow] serial on {args.port}")
 
-model_path = sys.argv[1]
-model_label = model_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-
-
-class _FrameBuffer:
-    """Reads a source in a background thread; always holds the latest frame."""
-
-    def __init__(self, spec: str):
-        self._frame = None
-        self._lock = threading.Lock()
-        threading.Thread(target=self._run, args=(spec,), daemon=True).start()
-
-    def _run(self, spec: str):
-        for frame in open_input(spec):
-            with self._lock:
-                self._frame = frame
-
-    def get(self):
-        with self._lock:
-            return self._frame
-
-
-def _make_mog():
-    return cv2.createBackgroundSubtractorMOG2(
-        history=MOG_DELTA_FRAMES,
-        varThreshold=MOG_VAR_THRESHOLD,
-        detectShadows=MOG_DETECT_SHADOWS,
-    )
-
-
-# Registry: key -> (_FrameBuffer, mog, YOLO | None, display_label)
+# ---- Source registry ----
 _registry: dict[str, tuple] = {}
 _registry_lock = threading.Lock()
+monitor: EighteeyesMonitor | None = None
 
 
 def _load_model_bg(key: str):
-    m = YOLO(model_path, task="detect")
+    m = YOLO(args.model, task="detect")
     with _registry_lock:
         if key in _registry:
             buf, mog, _, label = _registry[key]
@@ -78,53 +47,40 @@ def _add_source(key: str, spec: str, label: str):
     with _registry_lock:
         if key in _registry:
             return
-        _registry[key] = (_FrameBuffer(spec), _make_mog(), None, label)
+        _registry[key] = (FrameBuffer(spec), make_mog(), None, label)
     threading.Thread(target=_load_model_bg, args=(key,), daemon=True).start()
     print(f"[+] {label}")
 
 
-# --- Parse args ---
-monitor: EighteeyesMonitor | None = None
-for _spec in sys.argv[2:]:
-    if _spec == "eighteyes":
+for spec in args.sources:
+    if spec == "eighteyes":
         if monitor is None:
             monitor = EighteeyesMonitor()
-            print("Scanning eighteyes1..16.local in the background...")
+            print("Scanning eighteyes1..16.local in background...")
     else:
-        _add_source(_spec, _spec, _spec)
+        _add_source(spec, spec, spec)
 
-
-def _sync_monitor():
-    """Add a source the first time DNS resolves a device. Never removes."""
-    if monitor is None:
-        return
-    active = monitor.get_active()
-    with _registry_lock:
-        current_keys = {k for k in _registry if k.startswith("eighteyes")}
-    for n, url in active.items():
-        key = f"eighteyes{n}"
-        if key not in current_keys:
-            _add_source(key, url, f"eighteyes{n}")
-
-
+# ---- Main loop ----
 FONT = cv2.FONT_HERSHEY_SIMPLEX
-EMA_ALPHA = 0.05
-ema_total = None
+ema_ms: float | None = None
 frame_count = 0
-_prev_frame_t = time.perf_counter()
-SWEEP_PATIENCE = 30   # frames without a target before sweep starts
-_no_target_frames = 0
+no_target_frames = 0
+prev_t = time.perf_counter()
 
 while True:
     t0 = time.perf_counter()
-    _dt = t0 - _prev_frame_t
-    _prev_frame_t = t0
-    _servo_yaw, _servo_pitch = (
-        aiming.update_estimated_angles(_dt) if follow
+    dt = t0 - prev_t
+    prev_t = t0
+
+    servo_yaw, servo_pitch = (
+        aiming.update_estimated_angles(dt) if args.follow
         else (aiming.YAW_CENTER, aiming.PITCH_CENTER)
     )
 
-    _sync_monitor()
+    # Sync newly discovered eighteyes cameras
+    if monitor:
+        for n, url in monitor.get_active().items():
+            _add_source(f"eighteyes{n}", url, f"eighteyes{n}")
 
     with _registry_lock:
         entries = list(_registry.items())
@@ -132,32 +88,25 @@ while True:
     panels = []
     active_labels = []
     follow_status = ""
+    found_target = False
     n_connected = sum(1 for _, (b, *_) in entries if b.get() is not None)
 
     for key, (buf, mog, model, label) in entries:
         frame = buf.get()
         if frame is None:
-            continue  # not yet connected
+            continue
 
-        small = cv2.resize(frame, (MOG_SCALE_W, MOG_SCALE_H), interpolation=cv2.INTER_LINEAR)
-        fg_mask = mog.apply(small)
-        fg_mask = cv2.resize(fg_mask, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_LINEAR)
-        fg_bgr = cv2.cvtColor(fg_mask, cv2.COLOR_GRAY2BGR)
-
-        suffix = f" [{label}]" if n_connected > 1 else ""
-
-        # Dead zone: centre FOLLOW_ZONE of each axis (drawn in frame coords;
-        # make_grid will scale proportionally to the display cell).
         fh, fw = frame.shape[:2]
-        margin_x = (1.0 - FOLLOW_ZONE) / 2.0
-        margin_y = (1.0 - FOLLOW_ZONE) / 2.0
-        dz_x1, dz_y1 = int(fw * margin_x), int(fh * margin_y)
-        dz_x2, dz_y2 = int(fw * (1.0 - margin_x)), int(fh * (1.0 - margin_y))
-        DZ_COLOR = (0, 220, 0)
+        suffix = f" [{label}]" if n_connected > 1 else ""
+        active_labels.append(label)
+
+        # Dead zone: centre FOLLOW_ZONE fraction of the frame
+        margin = (1.0 - FOLLOW_ZONE) / 2.0
+        dz_x1, dz_y1 = int(fw * margin), int(fh * margin)
+        dz_x2, dz_y2 = int(fw * (1 - margin)), int(fh * (1 - margin))
 
         panels.append((f"Raw{suffix}", frame))
-        panels.append((f"MoG{suffix}", fg_bgr))
-        active_labels.append(label)
+        panels.append((f"MoG{suffix}", apply_mog(mog, frame)))
 
         if model is not None:
             results = model.track(frame, verbose=False, persist=True, imgsz=640, conf=0.6)
@@ -169,55 +118,48 @@ while True:
             if boxes is not None and len(boxes) > 0:
                 best = int(boxes.conf.cpu().numpy().argmax())
                 x1, y1, x2, y2 = boxes.xyxy[best].cpu().numpy()
-                tx = (x1 + x2) / 2.0
-                ty = (y1 + y2) / 2.0
+                tx, ty = (x1 + x2) / 2.0, (y1 + y2) / 2.0
 
-                if follow:
-                    inside = dz_x1 <= tx <= dz_x2 and dz_y1 <= ty <= dz_y2
-                    if inside:
-                        _no_target_frames = 0
-                        aiming.reset_sweep()
+                found_target = True
+                if args.follow:
+                    no_target_frames = 0
+                    aiming.reset_sweep()
+                    if dz_x1 <= tx <= dz_x2 and dz_y1 <= ty <= dz_y2:
                         follow_status = f"  |  follow: in zone ({tx:.0f},{ty:.0f})"
                     else:
-                        _no_target_frames = 0
-                        aiming.reset_sweep()
-                        world_yaw   = _servo_yaw   + (0.5 - tx / fw) * HFOV_DEG
-                        world_pitch = _servo_pitch + (ty / fh - 0.5) * VFOV_DEG
+                        world_yaw   = servo_yaw   + (0.5 - tx / fw) * HFOV_DEG
+                        world_pitch = servo_pitch + (ty / fh - 0.5) * VFOV_DEG
                         aiming.aim(world_yaw, world_pitch)
                         follow_status = f"  |  follow: → {world_yaw:.1f}° {world_pitch:.1f}°"
-            elif follow:
+            elif args.follow:
                 follow_status = "  |  follow: no det"
 
-    if follow and follow_status == "":
-        _no_target_frames += 1
-        if _no_target_frames >= SWEEP_PATIENCE:
+    if args.follow and not found_target:
+        no_target_frames += 1
+        if no_target_frames >= SWEEP_PATIENCE:
             aiming.sweep_tick()
-            follow_status = f"  |  follow: sweeping ({_no_target_frames}f)"
+            follow_status = f"  |  follow: sweeping ({no_target_frames}f)"
 
     if not panels:
         time.sleep(0.01)
         continue
 
-    total_ms = (time.perf_counter() - t0) * 1000
+    elapsed_ms = (time.perf_counter() - t0) * 1000
     frame_count += 1
-    if ema_total is None:
-        ema_total = total_ms
-    else:
-        ema_total += EMA_ALPHA * (total_ms - ema_total)
+    ema_ms = elapsed_ms if ema_ms is None else ema_ms + EMA_ALPHA * (elapsed_ms - ema_ms)
+
+    src_str = "  +  ".join(active_labels) if active_labels else "no sources"
+    status = (f"Total {ema_ms:.1f}ms  ({1000 / ema_ms:.1f} fps avg)  |  "
+              f"frame {frame_count}  |  {src_str}{follow_status}")
 
     grid = make_grid(panels)
-
-    bar_h = 28
-    bar = np.zeros((bar_h, grid.shape[1], 3), dtype=np.uint8)
-    src_str = "  +  ".join(active_labels) if active_labels else "no sources"
-    status = (f"Total {ema_total:.1f}ms  ({1000 / ema_total:.1f} fps avg)  |  "
-              f"frame {frame_count}  |  {src_str}{follow_status}")
-    cv2.putText(bar, status, (8, bar_h - 8), FONT, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
+    bar = np.zeros((28, grid.shape[1], 3), dtype=np.uint8)
+    cv2.putText(bar, status, (8, 20), FONT, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
 
     print(f"\r{status}", end="", flush=True)
     cv2.imshow("sixeyes", np.vstack([grid, bar]))
 
-    key_pressed = cv2.waitKey(1) & 0xFF
-    if key_pressed == ord("q"):
+    if cv2.waitKey(1) & 0xFF == ord("q"):
         break
+
 cv2.destroyAllWindows()

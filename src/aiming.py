@@ -1,7 +1,6 @@
 import math
 import time
 import serial
-from config import HFOV_DEG, VFOV_DEG  # noqa: F401
 
 # Servo limits and centres (must match esp32.ino)
 YAW_CENTER   = 90.0
@@ -96,23 +95,9 @@ def reset_sweep() -> None:
 
 
 def aim(world_yaw: float, world_pitch: float) -> None:
-    global _last_send, _cmd_yaw, _cmd_pitch
-
     if (abs(world_yaw - _est_yaw) <= DEADBAND_DEG and
             abs(world_pitch - _est_pitch) <= DEADBAND_DEG):
         return
-
-    now = time.monotonic()
-    if now - _last_send < SEND_INTERVAL:
+    if time.monotonic() - _last_send < SEND_INTERVAL:
         return
-    _last_send = now
-
-    yaw   = int(max(YAW_MIN,   min(YAW_MAX,   world_yaw)))
-    pitch = int(max(PITCH_MIN, min(PITCH_MAX, world_pitch)))
-
-    _cmd_yaw   = float(yaw)
-    _cmd_pitch = float(pitch)
-
-    if _ser and _ser.is_open:
-        _ser.write(bytes([0xFF, pitch, yaw]))
-        _ser.flush()
+    _send_raw(world_yaw, world_pitch)
