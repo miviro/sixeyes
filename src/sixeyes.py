@@ -12,7 +12,6 @@ from config import (FOLLOW_PORT, FOLLOW_ZONE, HFOV_DEG, VFOV_DEG,
                     SWEEP_PATIENCE, EMA_ALPHA, DZ_COLOR)
 from display import make_grid
 from input_source import FrameBuffer, EighteeyesMonitor
-from mog import make_mog, apply_mog
 from recorder import Recorder
 
 # ---- CLI ----
@@ -40,15 +39,15 @@ def _load_model_bg(key: str):
     m = YOLO(args.model, task="detect")
     with _registry_lock:
         if key in _registry:
-            buf, mog, _, label = _registry[key]
-            _registry[key] = (buf, mog, m, label)
+            buf, last_bb, _, label = _registry[key]
+            _registry[key] = (buf, last_bb, m, label)
 
 
 def _add_source(key: str, spec: str, label: str):
     with _registry_lock:
         if key in _registry:
             return
-        _registry[key] = (FrameBuffer(spec), make_mog(), None, label)
+        _registry[key] = (FrameBuffer(spec), None, None, label)
     threading.Thread(target=_load_model_bg, args=(key,), daemon=True).start()
     print(f"[+] {label}")
 
@@ -94,7 +93,7 @@ try:
         found_target = False
         n_connected = sum(1 for _, (b, *_) in entries if b.get() is not None)
 
-        for key, (buf, mog, model, label) in entries:
+        for key, (buf, last_bb, model, label) in entries:
             frame = buf.get()
             if frame is None:
                 continue
@@ -109,20 +108,28 @@ try:
             dz_x2, dz_y2 = int(fw * (1 - margin)), int(fh * (1 - margin))
 
             panels.append((f"Raw{suffix}", frame))
-            panels.append((f"MoG{suffix}", apply_mog(mog, frame)))
+            bb_panel = last_bb if last_bb is not None else np.zeros((1, 1, 3), dtype=np.uint8)
+            panels.append((f"Last Det{suffix}", bb_panel))
 
             if model is not None:
                 results = model.track(frame, verbose=False, persist=True, imgsz=640, conf=0.6)
                 yolo_bgr = results[0].plot()
                 cv2.rectangle(yolo_bgr, (dz_x1, dz_y1), (dz_x2, dz_y2), DZ_COLOR, 2)
                 panels.append((f"{model_label}{suffix}", yolo_bgr))
-                recorder.log(label, yolo_bgr, results[0], frame_count)
+                recorder.log(label, frame, yolo_bgr, results[0], frame_count)
 
                 boxes = results[0].boxes
                 if boxes is not None and len(boxes) > 0:
                     best = int(boxes.conf.cpu().numpy().argmax())
                     x1, y1, x2, y2 = boxes.xyxy[best].cpu().numpy()
+                    x1, y1, x2, y2 = max(0, int(x1)), max(0, int(y1)), min(fw, int(x2)), min(fh, int(y2))
                     tx, ty = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+
+                    new_bb = frame[y1:y2, x1:x2].copy()
+                    with _registry_lock:
+                        if key in _registry:
+                            buf2, _, m2, lbl2 = _registry[key]
+                            _registry[key] = (buf2, new_bb, m2, lbl2)
 
                     found_target = True
                     if args.follow:
