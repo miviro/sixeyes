@@ -68,6 +68,8 @@ class SourceWorker:
         while True:
             seq, frame = self.buf.wait(last_seq)
             if frame is None or seq <= last_seq:
+                if self.buf.finished:
+                    break
                 continue
             last_seq = seq
 
@@ -160,9 +162,13 @@ try:
 
             suffix = f" [{w.label}]" if n_connected > 1 else ""
             snap = w.snapshot()
-            active_labels.append(
-                f"{w.label} {snap.infer_ms:.0f}ms" if snap else w.label
-            )
+            if w.buf.finished:
+                suffix += " (finished)"
+                active_labels.append(f"{w.label} (finished)")
+            else:
+                active_labels.append(
+                    f"{w.label} {snap.infer_ms:.0f}ms" if snap else w.label
+                )
 
             panels.append((f"Raw{suffix}", frame))
             bb_panel = (snap.last_bb if snap and snap.last_bb is not None

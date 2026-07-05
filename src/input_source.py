@@ -15,6 +15,7 @@ class FrameBuffer:
     def __init__(self, spec: str):
         self._frame = None
         self._seq = 0
+        self.finished = False
         self._cond = threading.Condition()
         threading.Thread(target=self._run, args=(spec,), daemon=True).start()
 
@@ -24,6 +25,9 @@ class FrameBuffer:
                 self._frame = frame
                 self._seq += 1
                 self._cond.notify_all()
+        with self._cond:
+            self.finished = True
+            self._cond.notify_all()
 
     def get(self):
         with self._cond:
