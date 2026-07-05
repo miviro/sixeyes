@@ -82,14 +82,17 @@ Positional arguments after the model path are input sources.
 
 ## Python pipeline (`src/sixeyes.py`)
 
-The main loop runs once per display frame. For every registered source:
+The pipeline is multithreaded in three stages:
 
-1. `_FrameBuffer.get()` — grab the latest frame from the background reader thread.
-2. MOG2 background subtraction — run on a downscaled copy (`MOG_SCALE_W × MOG_SCALE_H`) then upscaled back, yielding a foreground mask panel.
-3. YOLO tracking — `model.track(frame, persist=True, imgsz=128, conf=0.1)` on the full frame. The model is loaded asynchronously in a background thread when a source is first registered; the YOLO panel is absent until it is ready.
-4. Dead-zone check — a green rectangle covering the centre `FOLLOW_ZONE` fraction of the frame is drawn on the YOLO panel. When `--follow` is active and the highest-confidence detection is **outside** the rectangle, `aiming.aim()` is called.
-5. `aiming.sweep_tick()` — called after `SWEEP_PATIENCE` (30) consecutive frames with no detection, sweeping the servos in a triangle/sine pattern.
-6. `make_grid()` renders all panels into a tiled window. A status bar at the bottom shows EMA frame time, FPS, active sources, and follow state.
+1. **Capture** — `FrameBuffer` reads each source in a background thread and holds the latest frame with a sequence number. `wait(last_seq)` blocks until a newer frame arrives, so downstream consumers never re-process a stale frame. File and folder sources are paced at their native fps (`_paced()` in `input_source.py`); live sources are unpaced.
+2. **Inference** — one `SourceWorker` thread per source. Each worker loads its own YOLO instance (tracker state lives on the model's predictor, so per-source instances keep track IDs independent), waits for new frames, runs `model.track(frame, persist=True, imgsz=640, conf=0.6)`, draws the annotated panel + dead-zone rectangle, extracts the best detection, and publishes an immutable `Snapshot` (annotated frame, last-detection crop, target centre, inference time). It then hands the frame to the recorder queue.
+3. **Recording** — `Recorder.log()` extracts box tensors to numpy in the calling thread and enqueues onto a bounded queue (`maxsize=64`, drops on overflow and reports the count at close). A single writer thread owns all `_SourceRecorder`s and does every disk write (raw/annotated mp4, crop JPEGs, CSV).
+
+The **main thread** does only display + aiming, capped at ~30 fps (`waitKey` doubles as the sleep):
+
+- Syncs newly discovered eighteyes cameras into new `SourceWorker`s.
+- Renders panels from worker snapshots via `make_grid()`; a status bar shows EMA display time, per-source inference times, and follow state.
+- Aiming consumes each snapshot at most once (tracked via `last_consumed` seq per source): dead-zone check → `aiming.aim()` when the best detection is outside the centre `FOLLOW_ZONE` rectangle; `aiming.sweep_tick()` after `SWEEP_PATIENCE` (30) consecutive display frames with no fresh detection. Serial I/O stays on the main thread.
 
 ---
 
@@ -232,14 +235,6 @@ Resolution is a compile-time constant — changing it requires reflashing.
 | `FOLLOW_ZONE` | 0.5 (centre 50% of each axis is the dead zone) |
 | `FOLLOW_PORT` | `/dev/ttyUSB0` |
 
-### MOG2
-| Constant | Value |
-|----------|-------|
-| `MOG_DELTA_FRAMES` | 200 |
-| `MOG_VAR_THRESHOLD` | 16 |
-| `MOG_DETECT_SHADOWS` | True |
-| `MOG_SCALE_W / H` | 192 / 108 |
-
 ---
 
 ## Making changes
@@ -254,7 +249,7 @@ Negate the `dx` or `dy` multiplier in `sixeyes.py` around line 200 (the `world_y
 Edit `esp32/eighteyes/wifi_config.h` and reflash with `make flash-cam`. Resolution is compile-time only.
 
 ### Adding a detection algorithm
-Add it in `src/` and call it inside the frame loop in `sixeyes.py` after the MOG2 step. Add tunables to `config.py`.
+Add it in `src/` and call it inside `SourceWorker._run()` in `sixeyes.py`, publishing extra panels via the `Snapshot`. Add tunables to `config.py`.
 
 ### Adding a new input type
 Add a generator function in `input_source.py` and extend the routing block in `open_input()`.

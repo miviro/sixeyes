@@ -1,4 +1,6 @@
 import csv
+import queue
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -39,7 +41,9 @@ class _SourceRecorder:
             str(self._src_dir / "annotated.mp4"), fourcc, 30.0, (w, h)
         )
 
-    def write(self, raw: np.ndarray, annotated: np.ndarray, results, frame_idx: int) -> None:
+    def write(self, raw: np.ndarray, annotated: np.ndarray,
+              xyxy: np.ndarray, conf: np.ndarray, ids: np.ndarray,
+              frame_idx: int) -> None:
         h, w = raw.shape[:2]
         if self._raw_writer is None:
             self._init_writers(h, w)
@@ -47,16 +51,9 @@ class _SourceRecorder:
         self._raw_writer.write(raw)
         self._ann_writer.write(annotated)
 
-        boxes = results.boxes
-        if boxes is None or len(boxes) == 0:
-            return
-
-        ids = (boxes.id.cpu().numpy().astype(int)
-               if boxes.id is not None else [-1] * len(boxes))
-
-        for i in range(len(boxes)):
-            x1, y1, x2, y2 = boxes.xyxy[i].cpu().numpy()
-            conf = float(boxes.conf[i].cpu())
+        for i in range(len(xyxy)):
+            x1, y1, x2, y2 = xyxy[i]
+            c = float(conf[i])
 
             crop_name = f"{self._det_id:06d}.jpg"
             rx1 = max(0, int(x1))
@@ -67,7 +64,7 @@ class _SourceRecorder:
                         [cv2.IMWRITE_JPEG_QUALITY, 90])
 
             self._csv.writerow([
-                self._det_id, frame_idx, int(ids[i]), f"{conf:.3f}",
+                self._det_id, frame_idx, int(ids[i]), f"{c:.3f}",
                 f"{x1:.1f}", f"{y1:.1f}", f"{x2:.1f}", f"{y2:.1f}",
                 f"{(x1 + x2) / 2:.1f}", f"{(y1 + y2) / 2:.1f}",
                 crop_name,
@@ -83,19 +80,54 @@ class _SourceRecorder:
 
 
 class Recorder:
-    def __init__(self):
+    """Queues log entries; a single writer thread does all disk I/O."""
+
+    def __init__(self, max_queue: int = 64):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._dir = _RUNS_DIR / ts
         self._dir.mkdir(parents=True, exist_ok=True)
+        self._queue: queue.Queue = queue.Queue(maxsize=max_queue)
+        self._dropped = 0
+        self._closing = False
         self._sources: dict[str, _SourceRecorder] = {}
+        self._thread = threading.Thread(target=self._run, daemon=True, name="recorder")
+        self._thread.start()
         print(f"[rec] saving to {self._dir}")
 
     def log(self, label: str, raw: np.ndarray, annotated: np.ndarray, results, frame_idx: int) -> None:
-        if label not in self._sources:
-            self._sources[label] = _SourceRecorder(self._dir, label)
-        self._sources[label].write(raw, annotated, results, frame_idx)
+        if self._closing:
+            return
+        boxes = results.boxes
+        if boxes is not None and len(boxes) > 0:
+            xyxy = boxes.xyxy.cpu().numpy()
+            conf = boxes.conf.cpu().numpy()
+            ids = (boxes.id.cpu().numpy().astype(int)
+                   if boxes.id is not None else np.full(len(boxes), -1))
+        else:
+            xyxy = np.empty((0, 4))
+            conf = np.empty(0)
+            ids = np.empty(0, dtype=int)
 
-    def close(self) -> None:
+        try:
+            self._queue.put_nowait((label, raw, annotated, xyxy, conf, ids, frame_idx))
+        except queue.Full:
+            self._dropped += 1
+
+    def _run(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                break
+            label, raw, annotated, xyxy, conf, ids, frame_idx = item
+            if label not in self._sources:
+                self._sources[label] = _SourceRecorder(self._dir, label)
+            self._sources[label].write(raw, annotated, xyxy, conf, ids, frame_idx)
         for src in self._sources.values():
             src.close()
-        print(f"\n[rec] {len(self._sources)} source(s) → {self._dir}")
+
+    def close(self) -> None:
+        self._closing = True
+        self._queue.put(None)
+        self._thread.join(timeout=30)
+        dropped = f"  ({self._dropped} frame(s) dropped)" if self._dropped else ""
+        print(f"\n[rec] {len(self._sources)} source(s) → {self._dir}{dropped}")

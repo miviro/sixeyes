@@ -14,17 +14,26 @@ class FrameBuffer:
 
     def __init__(self, spec: str):
         self._frame = None
-        self._lock = threading.Lock()
+        self._seq = 0
+        self._cond = threading.Condition()
         threading.Thread(target=self._run, args=(spec,), daemon=True).start()
 
     def _run(self, spec: str):
         for frame in open_input(spec):
-            with self._lock:
+            with self._cond:
                 self._frame = frame
+                self._seq += 1
+                self._cond.notify_all()
 
     def get(self):
-        with self._lock:
-            return self._frame
+        with self._cond:
+            return self._seq, self._frame
+
+    def wait(self, last_seq: int, timeout: float = 0.5):
+        """Block until a frame newer than last_seq arrives (or timeout)."""
+        with self._cond:
+            self._cond.wait_for(lambda: self._seq > last_seq, timeout=timeout)
+            return self._seq, self._frame
 
 
 class EighteeyesMonitor:
@@ -101,20 +110,42 @@ def _camera(index: int):
         time.sleep(1)
 
 
+def _paced(frames, fps: float):
+    """Yield frames at the given rate so file sources play in real time."""
+    interval = 1.0 / fps
+    next_t = time.perf_counter()
+    for frame in frames:
+        now = time.perf_counter()
+        if now < next_t:
+            time.sleep(next_t - now)
+        next_t = max(next_t + interval, now)
+        yield frame
+
+
 def _video(path: str):
     cap = cv2.VideoCapture(path)
-    try:
-        while cap.isOpened():
-            ok, frame = cap.read()
-            if not ok:
-                break
-            yield frame
-    finally:
-        cap.release()
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if not fps or fps <= 0:
+        fps = 30.0
+
+    def frames():
+        try:
+            while cap.isOpened():
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                yield frame
+        finally:
+            cap.release()
+
+    return _paced(frames(), fps)
 
 
 def _folder(path: Path):
-    for p in sorted(p for p in path.iterdir() if p.suffix.lower() in IMAGE_EXTS):
-        img = cv2.imread(str(p))
-        if img is not None:
-            yield img
+    def frames():
+        for p in sorted(p for p in path.iterdir() if p.suffix.lower() in IMAGE_EXTS):
+            img = cv2.imread(str(p))
+            if img is not None:
+                yield img
+
+    return _paced(frames(), 30.0)
