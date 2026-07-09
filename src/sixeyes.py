@@ -22,6 +22,7 @@ parser.add_argument("model", help="YOLO model .pt file")
 parser.add_argument("sources", nargs="+",
                     help="input sources: camera:N, http://..., path/to/file, path/to/dir, eighteyes")
 parser.add_argument("--follow", action="store_true", help="enable servo tracking via serial")
+parser.add_argument("--headless", action="store_true", help="run without display windows")
 parser.add_argument("--port", default=FOLLOW_PORT, help="serial port for --follow")
 args = parser.parse_args()
 
@@ -220,11 +221,17 @@ try:
         status = (f"{1000 / ema_ms:.1f} fps  |  "
                   f"frame {frame_count}  |  {src_str}{follow_status}")
 
+        print(f"\r{status}", end="", flush=True)
+
+        if args.headless:
+            if workers and all(w.buf.finished for w in workers.values()):
+                break
+            time.sleep(max(0.001, FRAME_BUDGET - (time.perf_counter() - t0)))
+            continue
+
         grid = make_grid(panels)
         bar = np.zeros((28, grid.shape[1], 3), dtype=np.uint8)
         cv2.putText(bar, status, (8, 20), FONT, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
-
-        print(f"\r{status}", end="", flush=True)
         cv2.imshow("sixeyes", np.vstack([grid, bar]))
 
         # Pace the display loop at ~30 fps; waitKey doubles as the sleep
@@ -235,5 +242,6 @@ finally:
     # A second Ctrl-C during cleanup would abort recorder.close() and leave
     # the writer thread wedged at interpreter shutdown
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    cv2.destroyAllWindows()
+    if not args.headless:
+        cv2.destroyAllWindows()
     recorder.close()
