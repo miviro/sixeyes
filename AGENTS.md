@@ -22,6 +22,7 @@ src/
   config.py         # All tuneable constants
   display.py        # make_grid() — renders panels into a tiled OpenCV window
   input_source.py   # Input generators: camera, video, folder, MJPEG URL, eighteyes
+  notifier.py       # ntfy.sh push alerts on new track ids (--ntfy)
 esp32/
   pantilt/
     pantilt.ino              # Servo firmware (yaw GPIO2, pitch GPIO4)
@@ -75,6 +76,7 @@ Press `q` to quit.
 |------|---------|---------|
 | `--follow` | off | Enable servo tracking via serial |
 | `--port DEV` | `/dev/ttyUSB0` | Serial port used by `--follow` |
+| `--ntfy [TOPIC]` | off (`NTFY_TOPIC` if no value given) | Push a ntfy.sh alert with the detection crop attached for each new track id |
 
 Positional arguments after the model path are input sources.
 
@@ -85,7 +87,7 @@ Positional arguments after the model path are input sources.
 The pipeline is multithreaded in three stages:
 
 1. **Capture** — `FrameBuffer` reads each source in a background thread and holds the latest frame with a sequence number. `wait(last_seq)` blocks until a newer frame arrives, so downstream consumers never re-process a stale frame. File and folder sources are paced at their native fps (`_paced()` in `input_source.py`); live sources are unpaced.
-2. **Inference** — one `SourceWorker` thread per source. Each worker loads its own YOLO instance (tracker state lives on the model's predictor, so per-source instances keep track IDs independent), waits for new frames, runs `model.track(frame, persist=True, imgsz=640, conf=0.6)`, draws the annotated panel + dead-zone rectangle, extracts the best detection, and publishes an immutable `Snapshot` (annotated frame, last-detection crop, target centre, inference time). It then hands the frame to the recorder queue.
+2. **Inference** — one `SourceWorker` thread per source. Each worker loads its own YOLO instance (tracker state lives on the model's predictor, so per-source instances keep track IDs independent), waits for new frames, runs `model.track(frame, persist=True, imgsz=640, conf=0.6)`, draws the annotated panel + dead-zone rectangle, extracts the best detection, and publishes an immutable `Snapshot` (annotated frame, last-detection crop, target centre, inference time). It then hands the frame to the recorder queue and, when `--ntfy` is active, to `Notifier.alert()` (new track ids → push with crop attached, rate-limited by `ALERT_COOLDOWN_S`).
 3. **Recording** — `Recorder.log()` extracts box tensors to numpy in the calling thread and enqueues onto a bounded queue (`maxsize=64`, drops on overflow and reports the count at close). A single writer thread owns all `_SourceRecorder`s and does every disk write (raw/annotated mp4, crop JPEGs, CSV).
 
 The **main thread** does only display + aiming, capped at ~30 fps (`waitKey` doubles as the sleep):
@@ -235,6 +237,13 @@ Resolution is a compile-time constant — changing it requires reflashing.
 | `FOLLOW_ZONE` | 0.5 (centre 50% of each axis is the dead zone) |
 | `FOLLOW_PORT` | `/dev/ttyUSB0` |
 
+### Alerts (ntfy)
+| Constant | Value |
+|----------|-------|
+| `NTFY_SERVER` | `https://ntfy.sh` |
+| `NTFY_TOPIC` | default topic when `--ntfy` is given without a value |
+| `ALERT_COOLDOWN_S` | 10 s minimum between pushes (global across sources) |
+
 ---
 
 ## Making changes
@@ -270,6 +279,7 @@ Edit `SERVO_SPEED_DEG_S`, `DEADBAND_DEG`, or `SEND_INTERVAL` at the top of `aimi
 | `opencv-python` | Video I/O, MOG2, display |
 | `numpy` | Array math |
 | `pyserial` | Serial communication with pan/tilt ESP32 |
+| `requests` | ntfy.sh push alerts (`--ntfy`) |
 | `ultralytics` | YOLO inference |
 | `arduino-cli` | Compile and flash ESP32 firmware |
 

@@ -6,6 +6,7 @@ dependencies = [
     "numpy",
     "opencv-python",
     "pyserial",
+    "requests",
     "ultralytics",
 ]
 

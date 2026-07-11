@@ -11,9 +11,10 @@ from ultralytics import YOLO
 
 import aiming
 from config import (FOLLOW_PORT, FOLLOW_ZONE, HFOV_DEG, VFOV_DEG,
-                    SWEEP_PATIENCE, EMA_ALPHA, DZ_COLOR)
+                    SWEEP_PATIENCE, EMA_ALPHA, DZ_COLOR, NTFY_TOPIC)
 from display import make_grid
 from input_source import FrameBuffer, EighteeyesMonitor
+from notifier import Notifier
 from recorder import Recorder
 
 # ---- CLI ----
@@ -28,6 +29,8 @@ parser.add_argument("--benchmark", nargs="?", const=50, type=int, default=None, 
                          "save results to runs/ and exit; sources are optional and only "
                          "used to grab a test frame")
 parser.add_argument("--port", default=FOLLOW_PORT, help="serial port for --follow")
+parser.add_argument("--ntfy", nargs="?", const=NTFY_TOPIC, default=None, metavar="TOPIC",
+                    help="push a ntfy.sh alert (with crop) for each new track id")
 args = parser.parse_args()
 
 if args.benchmark is None and not args.sources:
@@ -59,11 +62,13 @@ class Snapshot:
 class SourceWorker:
     """Owns a capture buffer and a YOLO instance; runs inference in its own thread."""
 
-    def __init__(self, spec: str, label: str, model_path: str, recorder: Recorder):
+    def __init__(self, spec: str, label: str, model_path: str, recorder: Recorder,
+                 notifier: Notifier | None = None):
         self.label = label
         self.buf = FrameBuffer(spec)
         self._model_path = model_path
         self._recorder = recorder
+        self._notifier = notifier
         self._lock = threading.Lock()
         self._snapshot: Snapshot | None = None
         threading.Thread(target=self._run, daemon=True, name=f"worker-{label}").start()
@@ -113,11 +118,14 @@ class SourceWorker:
                 self._snapshot = snap
 
             self._recorder.log(self.label, frame, annotated, results[0], frame_idx)
+            if self._notifier:
+                self._notifier.alert(self.label, frame, results[0])
             frame_idx += 1
 
 
 # ---- Source registry (main thread only) ----
 recorder = Recorder()
+notifier = Notifier(args.ntfy) if args.ntfy else None
 workers: dict[str, SourceWorker] = {}
 monitor: EighteeyesMonitor | None = None
 
@@ -125,7 +133,7 @@ monitor: EighteeyesMonitor | None = None
 def _add_source(key: str, spec: str, label: str):
     if key in workers:
         return
-    workers[key] = SourceWorker(spec, label, args.model, recorder)
+    workers[key] = SourceWorker(spec, label, args.model, recorder, notifier)
     print(f"[+] {label}")
 
 

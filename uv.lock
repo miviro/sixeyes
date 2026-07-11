@@ -1211,6 +1211,7 @@ dependencies = [
     { name = "numpy" },
     { name = "opencv-python" },
     { name = "pyserial" },
+    { name = "requests" },
     { name = "ultralytics" },
 ]
 
@@ -1219,6 +1220,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "opencv-python" },
     { name = "pyserial" },
+    { name = "requests" },
     { name = "ultralytics" },
 ]
 

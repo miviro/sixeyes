@@ -25,6 +25,11 @@ FOLLOW_PORT     = "/dev/ttyUSB0"
 SWEEP_PATIENCE  = 30           # frames without any detection before sweep starts
 DZ_COLOR        = (0, 220, 0)  # dead-zone rectangle colour (BGR)
 
+# --- Alerts (ntfy) ---
+NTFY_SERVER      = "https://ntfy.sh"
+NTFY_TOPIC       = "sixeyes-miviro-alertas"  # default topic for --ntfy
+ALERT_COOLDOWN_S = 10.0                      # min seconds between pushes (global)
+
 # --- Main loop ---
 EMA_ALPHA = 0.05  # smoothing factor for frame-time EMA
 
