@@ -92,7 +92,7 @@ class SourceWorker:
             last_seq = seq
 
             t0 = time.perf_counter()
-            results = model.track(frame, verbose=False, persist=True, imgsz=640, conf=0.6)
+            results = model.track(frame, verbose=False, persist=True, imgsz=1280, conf=0.6)
             infer_ms = (time.perf_counter() - t0) * 1000
 
             fh, fw = frame.shape[:2]

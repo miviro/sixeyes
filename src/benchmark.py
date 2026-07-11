@@ -24,7 +24,7 @@ from config import CAMERA_W, CAMERA_H
 _RUNS_DIR = Path(__file__).parent.parent / "runs"
 
 WARMUP = 5
-PIPELINE_IMGSZ = 640   # must match SourceWorker's model.track() call
+PIPELINE_IMGSZ = 1280  # must match SourceWorker's model.track() call
 PIPELINE_CONF = 0.6
 SWEEP_IMGSZ = [320, 640, 960, 1280]
 
