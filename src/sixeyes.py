@@ -20,25 +20,21 @@ from recorder import Recorder
 # ---- CLI ----
 parser = argparse.ArgumentParser(prog="sixeyes")
 parser.add_argument("model", help="YOLO model .pt file")
-parser.add_argument("sources", nargs="*",
+parser.add_argument("sources", nargs="+",
                     help="input sources: camera:N, http://..., path/to/file, path/to/dir, eighteyes")
 parser.add_argument("--follow", action="store_true", help="enable servo tracking via serial")
 parser.add_argument("--headless", action="store_true", help="run without display windows")
-parser.add_argument("--benchmark", nargs="?", const=50, type=int, default=None, metavar="N",
-                    help="benchmark model speed (N timed iterations, default 50), "
-                         "save results to runs/ and exit; sources are optional and only "
-                         "used to grab a test frame")
+parser.add_argument("--benchmark", action="store_true",
+                    help="measure detect/track latency over the whole first source, "
+                         "save results to runs/ and exit")
 parser.add_argument("--port", default=FOLLOW_PORT, help="serial port for --follow")
 parser.add_argument("--ntfy", nargs="?", const=NTFY_TOPIC, default=None, metavar="TOPIC",
                     help="push a ntfy.sh alert (with crop) for each new track id")
 args = parser.parse_args()
 
-if args.benchmark is None and not args.sources:
-    parser.error("at least one source is required (unless running --benchmark)")
-
-if args.benchmark is not None:
+if args.benchmark:
     from benchmark import run_benchmark
-    run_benchmark(args.model, args.sources, args.benchmark)
+    run_benchmark(args.model, args.sources[0])
     raise SystemExit(0)
 
 model_label = Path(args.model).stem
