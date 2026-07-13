@@ -48,36 +48,33 @@ def _measure(call, spec: str, name: str) -> list[float]:
 
 def _row(name: str, ms: list[float]) -> str:
     a = np.asarray(ms)
-    return (f"{name:<8}{len(a):>8}{a.mean():>10.1f}{np.median(a):>10.1f}"
+    return (f"{name:<10}{len(a):>8}{a.mean():>10.1f}{np.median(a):>10.1f}"
             f"{np.percentile(a, 95):>10.1f}{np.percentile(a, 99):>10.1f}"
             f"{1000 / a.mean():>8.1f}")
 
 
 def run_benchmark(model_path: str, spec: str) -> None:
-    model = YOLO(model_path, task="detect")
-
-    def detect(f):
-        model.predict(f, verbose=False, imgsz=IMGSZ, conf=CONF)
-
-    def track(f):
-        model.track(f, verbose=False, persist=True, imgsz=IMGSZ, conf=CONF)
-
     warm = next(_frames(spec), None)
     if warm is None:
         raise SystemExit(f"[bench] no frames read from {spec!r}")
-    for _ in range(WARMUP):
-        detect(warm)
 
-    detect_ms = _measure(detect, spec, "detect")
-    # track goes last: it attaches tracker callbacks to the predictor, which
-    # would then also run on every later predict() call and skew it
-    track_ms = _measure(track, spec, "track")
+    def _bench(name: str, **kw) -> str:
+        # Fresh model per pass: track() sticks its tracker to the predictor,
+        # and with persist=True a later pass would silently reuse it
+        model = YOLO(model_path, task="detect")
+        method = model.track if "tracker" in kw else model.predict
+        for _ in range(WARMUP):
+            model.predict(warm, verbose=False, imgsz=IMGSZ, conf=CONF)
+        return _row(name, _measure(
+            lambda f: method(f, verbose=False, imgsz=IMGSZ, conf=CONF, **kw),
+            spec, name))
 
     report = "\n".join([
         f"model: {model_path}  |  input: {spec}  |  imgsz={IMGSZ} conf={CONF}",
-        f"{'mode':<8}{'frames':>8}{'mean ms':>10}{'median':>10}{'p95':>10}{'p99':>10}{'fps':>8}",
-        _row("detect", detect_ms),
-        _row("track", track_ms),
+        f"{'mode':<10}{'frames':>8}{'mean ms':>10}{'median':>10}{'p95':>10}{'p99':>10}{'fps':>8}",
+        _bench("detect"),
+        _bench("bytetrack", tracker="bytetrack.yaml", persist=True),
+        _bench("botsort", tracker="botsort.yaml", persist=True),  # pipeline default
     ])
     print(report)
 
