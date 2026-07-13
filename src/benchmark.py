@@ -48,8 +48,7 @@ def _measure(call, spec: str, name: str) -> list[float]:
 
 def _row(name: str, ms: list[float]) -> str:
     a = np.asarray(ms)
-    return (f"{name:<10}{len(a):>8}{a.mean():>10.1f}{np.median(a):>10.1f}"
-            f"{np.percentile(a, 95):>10.1f}{np.percentile(a, 99):>10.1f}"
+    return (f"{name:<10}{len(a):>8}{a.mean():>10.1f}{a.std(ddof=1):>10.1f}"
             f"{1000 / a.mean():>8.1f}")
 
 
@@ -71,7 +70,7 @@ def run_benchmark(model_path: str, spec: str) -> None:
 
     report = "\n".join([
         f"model: {model_path}  |  input: {spec}  |  imgsz={IMGSZ} conf={CONF}",
-        f"{'mode':<10}{'frames':>8}{'mean ms':>10}{'median':>10}{'p95':>10}{'p99':>10}{'fps':>8}",
+        f"{'mode':<10}{'frames':>8}{'mean ms':>10}{'std ms':>10}{'fps':>8}",
         _bench("detect"),
         _bench("bytetrack", tracker="bytetrack.yaml", persist=True),
         _bench("botsort", tracker="botsort.yaml", persist=True),  # pipeline default
